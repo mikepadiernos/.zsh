@@ -61,7 +61,6 @@ _zsh_tools_custom_link_mappings=(
 # Format: "<target path relative to HOME>|<source path relative to FILES>"
 _zsh_tools_counterpart_link_mappings=(
 	".fzf|.fzf"
-	".zshrc|.zsh/.zshrc"
 )
 
 _zsh_tools_normalize_path() {

@@ -295,37 +295,73 @@ Required base:
 - zsh
 - git
 - neovim (or adjust EDITOR)
-- ripgrep (recommended)
+- ripgrep
+- curl
 
-Recommended core tooling:
+Required repository layout:
+- this zsh repo must live at `~/.zsh`
+- a separate `~/.files` directory is required
+- `FILES` defaults to `~/.files`; app-specific configs are expected under `~/.files` (for example `.atuin`, `.lazygit`, `.yazi`, `.qute`, `.copyq`, `.vscode`, `.gtk-nocsd`)
+
+Required `~/.files` contents for full setup behavior:
+- `~/.files/.fzf`
+- `~/.files/.vscode/settings.json`
+- `~/.files/.vscode/keybindings.json`
+- `~/.files/.atuin`
+- `~/.files/.atuin/data`
+- `~/.files/.qute`
+- `~/.files/.copyq`
+- `~/.files/.yazi`
+- `~/.files/.lazygit`
+- `~/.files/.lazydocker`
+- `~/.files/.gtk-nocsd/config/gtk-nocsd-blacklist`
+- `~/.files/.gtk-nocsd/applications/filec.desktop`
+- `~/.files/.gtk-nocsd/bin/gtk-nocsd-sync-shims`
+- `~/.files/.gtk-nocsd/bin/gtk-nocsd-run`
+- `~/.files/.gtk-nocsd/shims/filecentipede`
+- `~/.files/.gtk-nocsd/shims/filec`
+- `~/.files/.gtk-nocsd/shims/fileu`
+
+Core runtime tooling for this shell:
 - mise
 - direnv
 - zoxide
 - atuin
 - fzf
+- eza
+- fd
+- bat
+- jq
 
-For completions and DevOps flows:
-- docker and docker-compose
+Container and DevOps flows:
+- docker CLI
+- docker compose v2 (or legacy `docker-compose`)
+- colima (required for the colima-integrated docker runtime flow)
+- lazydocker
 - kubectl
 - helm
 - argocd
 - azure-cli
 - gh
 
-For update orchestration:
-- brew (optional, Linuxbrew/macOS)
-- paru or yay or pacman (Arch) OR apt (Ubuntu)
+Update orchestration and package backends:
+- brew (optional, non-root)
+- paru or yay or pacman (Arch)
+- dnf5 or dnf or yum (Fedora)
+- apt (Ubuntu/Debian)
 - flatpak (optional)
 - fwupdmgr (optional)
-- kpackagetool6 and curl (for plasmoids)
+- kpackagetool6 and curl (plasmoids flow)
 
-For credential-backed flows:
+Credential-backed flows:
 - pass
 - gpg and gpg-agent
 
-For ecosystem-specific helpers:
-- ddev (for Drush helper functions)
-- nvidia-smi and steam (for GPU offload helpers)
+Ecosystem-specific helpers:
+- ddev (Drush helper functions)
+- qutebrowser, copyq, yazi, lazygit, lazydocker (for config link mappings)
+- code command on PATH (for VS Code settings/keybindings link mappings)
+- nvidia-smi and steam (GPU offload helpers)
 
 ### Daily Workflow
 

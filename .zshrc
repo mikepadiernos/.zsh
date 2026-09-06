@@ -26,7 +26,6 @@ export DIRENV_SKIP_TIMEOUT=TRUE
 
 # App Config paths
 export FILES="${FILES:-$HOME/.files}"
-export CONFIGS="${CONFIGS:-$FILES/configs}"
 
 # Project paths
 export ZSH="$HOME/.zsh"
