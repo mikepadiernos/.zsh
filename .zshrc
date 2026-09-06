@@ -27,6 +27,9 @@ export DIRENV_SKIP_TIMEOUT=TRUE
 # App Config paths
 export FILES="${FILES:-$HOME/.files}"
 
+# Prompt preference
+export ZSH_PROMPT_LAYOUT="singleline_verbose"
+
 # Project paths
 export ZSH="$HOME/.zsh"
 export ZSH_CONFIGS="$ZSH/configs"

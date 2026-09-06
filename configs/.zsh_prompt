@@ -126,18 +126,40 @@ __zsh_prompt_right_prefix() {
 	__zsh_prompt_prefix "$ZSH_PROMPT_RIGHT_PREFIX" "$ZSH_PROMPT_RIGHT_PREFIX_FUNCTION" "$(__zsh_prompt_color_escape right_prompt_prefix default)"
 }
 
+__zsh_prompt_is_wsl() {
+	[[ -n "$WSL_DISTRO_NAME" || -n "$WSL_INTEROP" ]] && return 0
+	[[ -r /proc/sys/kernel/osrelease ]] && grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && return 0
+	return 1
+}
+
 __zsh_prompt_virtual_env() {
 	if [[ -z "$VIRTUAL_ENV_DISABLE_PROMPT" ]]; then
 		local virtual_env=""
+		local env_name=""
+		local env_label=""
 
 		if [[ -n "$VIRTUAL_ENV" ]]; then
-			virtual_env="($(basename "$VIRTUAL_ENV")) "
+			env_name="$(basename "$VIRTUAL_ENV")"
 		elif [[ -n "$CONDA_PROMPT_MODIFIER" ]]; then
-			virtual_env="($(basename "$CONDA_PROMPT_MODIFIER")) "
+			env_name="$(basename "$CONDA_PROMPT_MODIFIER")"
+			env_name="${env_name#(}"
+			env_name="${env_name%)}"
 		fi
 
-		if [[ -n "$virtual_env" ]]; then
-			print -r -- "$(__zsh_prompt_color_escape virtual_env default)$virtual_env"
+		while [[ "$env_name" == .* ]]; do
+			env_name="${env_name#.}"
+		done
+
+		if [[ -n "$env_name" ]]; then
+			env_label="$env_name"
+			if __zsh_prompt_is_wsl; then
+				env_label="wsl.${env_name}"
+			fi
+			virtual_env="%K{#131313}%F{yellow}[${env_label}]%f%k "
+			print -r -- "$virtual_env"
+		elif __zsh_prompt_is_wsl; then
+			virtual_env="%K{#131313}%F{yellow}[wsl]%f%k "
+			print -r -- "$virtual_env"
 		fi
 	fi
 }
@@ -594,7 +616,7 @@ __zsh_prompt_refresh() {
 		__zsh_prompt_context
 	fi
 
-	state="$PWD|$PROMPT_GIT_TIP|$PROMPT_GIT_BRANCH|$PROMPT_GIT_STATUS|$PROMPT_GIT_REPO_NAME|$ZSH_PROMPT_LAYOUT|$ZSH_PROMPT_RELATIVE_PATH|$VIRTUAL_ENV|$CONDA_PROMPT_MODIFIER|$__ZSH_PROMPT_LAST_EXIT_CODE|$__ZSH_PROMPT_BG_JOBS_COUNT|$ZSH_PROMPT_GLYPH_MODE|$ZSH_PROMPT_SYMBOL|$ZSH_PROMPT_ARROW_SYMBOL|$ZSH_PROMPT_SYMBOL_ASCII|$ZSH_PROMPT_SYMBOL_UNICODE|$ZSH_PROMPT_ARROW_ASCII|$ZSH_PROMPT_ARROW_UNICODE"
+	state="$PWD|$PROMPT_GIT_TIP|$PROMPT_GIT_BRANCH|$PROMPT_GIT_STATUS|$PROMPT_GIT_REPO_NAME|$ZSH_PROMPT_LAYOUT|$ZSH_PROMPT_RELATIVE_PATH|$VIRTUAL_ENV|$CONDA_PROMPT_MODIFIER|$WSL_DISTRO_NAME|$WSL_INTEROP|$__ZSH_PROMPT_LAST_EXIT_CODE|$__ZSH_PROMPT_BG_JOBS_COUNT|$ZSH_PROMPT_GLYPH_MODE|$ZSH_PROMPT_SYMBOL|$ZSH_PROMPT_ARROW_SYMBOL|$ZSH_PROMPT_SYMBOL_ASCII|$ZSH_PROMPT_SYMBOL_UNICODE|$ZSH_PROMPT_ARROW_ASCII|$ZSH_PROMPT_ARROW_UNICODE"
 	[[ "$state" == "$__ZSH_PROMPT_LAST_STATE" ]] && return 0
 	typeset -g __ZSH_PROMPT_LAST_STATE="$state"
 
@@ -632,7 +654,7 @@ __zsh_prompt_refresh() {
 		return_code=""
 	fi
 
-	user_host="$(__zsh_prompt_color_escape host yellow)%n$(__zsh_prompt_color_escape host_user_connector default)@$(__zsh_prompt_color_escape user yellow)%m"
+	user_host="%K{#131313}%F{yellow} %n@%m%f %k"
 	prompt_body="${virtual_env_prefix}$(__zsh_prompt_color_escape current_directory magenta)${compressed_pwd} ${prompt_color}${return_code}${prompt_symbol} $(__zsh_prompt_color_escape prompt default)"
 
 	if [[ -n "$PROMPT_GIT_BRANCH" ]]; then
