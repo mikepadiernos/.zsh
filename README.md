@@ -191,6 +191,10 @@ Actions:
 - --update: fetch and fast-forward pull plugin repos
 - --check-forks: warn when forked plugin repos are missing `upstream` or behind upstream
 
+Startup default:
+- Missing plugin repos are not auto-cloned during shell init unless `ZSH_PLUGIN_AUTO_INSTALL_REPOS=true` is set.
+- Recommended first-run bootstrap: `zsh_plugins --install`.
+
 Options:
 - --no-fetch: skip fetch before checks/updates
 - --dry-run: print commands only
