@@ -257,7 +257,11 @@ _zsh_install_plugin_if_missing() {
 
 _zsh_prepare_abbr_dependency() {
     local plugin_dir="$ZSH_PLUGINS/zsh-abbr"
+    local standalone_dependency_file="$ZSH_PLUGINS/zsh-job-queue/zsh-job-queue.zsh"
     local dependency_file="$plugin_dir/zsh-job-queue/zsh-job-queue.zsh"
+
+    # Standalone zsh-job-queue plugin satisfies zsh-abbr dependency.
+    [[ -f "$standalone_dependency_file" ]] && return 0
 
     [[ -f "$dependency_file" ]] && return 0
     [[ -f "$plugin_dir/.gitmodules" ]] || return 1
@@ -304,6 +308,7 @@ source_plugin() {
 # zeza
 # zsh-alias-finder
 
+source_plugin "zsh-job-queue"                                                                     # zsh-job-queue
 source_plugin "zsh-abbr"                                                                          # zsh-abbr
 source_plugin "zsh-autocompletion"                                                                # zsh-autocompletion
 source_plugin "zsh-autosuggestions"                                                               # zsh-autosuggestions

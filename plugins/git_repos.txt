@@ -12,6 +12,7 @@ https://github.com/michaelpadiernos-forks/zsh-F-Sy-H.git
 https://github.com/michaelpadiernos-forks/zsh-fzf-git-branches.git
 https://github.com/michaelpadiernos-forks/zsh-fzf-plugin.git
 https://github.com/michaelpadiernos-forks/zsh-fzf-tab.git
+https://github.com/michaelpadiernos-forks/zsh-job-queue.git
 https://github.com/michaelpadiernos-forks/zsh-magic-dashboard.git
 https://github.com/michaelpadiernos-forks/zsh-mise.git
 https://github.com/michaelpadiernos-forks/zsh-ssh.git
