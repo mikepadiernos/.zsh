@@ -396,6 +396,46 @@ Ecosystem-specific helpers:
 - git-pass-save
 - git-env-sync
 
+### Automated Tooling Updates
+
+Policy-aware update wrapper:
+- ./scripts/update-tools.sh
+- ./scripts/update-tools.sh --dry-run
+- ./scripts/update-tools.sh --scheduled --no-plasma --no-vscode
+- ./scripts/update-tools.sh --ensure-user-timer
+
+Behavior:
+- Always runs `tools --update`.
+- Enforces root safety by adding `--no-brew` automatically in root sessions.
+- `--scheduled` disables privileged/interactive update stages (`--no-paru --no-grub --no-firmware`).
+- `--ensure-user-timer` auto-installs and enables the user systemd timer when user systemd is available.
+
+VS Code tasks:
+- `tools:update`
+- `tools:update:dry-run`
+- `tools:update:scheduled-safe`
+- `tools:install-user-timer`
+- `tools:update:auto-timer`
+
+Copilot deterministic enforcement hook:
+- `.github/hooks/upgrade-policy-guard.json`
+- Blocks unsafe upgrade paths such as `sudo brew ...` or `doas brew ...`.
+
+systemd user timer template:
+1. `mkdir -p ~/.config/systemd/user`
+2. `cp scripts/systemd/zsh-tools-update.service ~/.config/systemd/user/`
+3. `cp scripts/systemd/zsh-tools-update.timer ~/.config/systemd/user/`
+4. `systemctl --user daemon-reload`
+5. `systemctl --user enable --now zsh-tools-update.timer`
+
+Auto-installer alternative:
+- `./scripts/systemd/install-user-timer.sh`
+- Safely skips when `systemctl` or user systemd manager is unavailable.
+
+cron template:
+- Use the line in `scripts/cron/zsh-tools-update.cron` in `crontab -e`.
+- Logs default to `~/.cache/zsh-tools-update.log`.
+
 ### Performance-Safe Defaults
 
 - Keep ZSH_PROMPT_ASYNC_GIT=true.

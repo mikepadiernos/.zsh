@@ -1,0 +1,9 @@
+[Unit]
+Description=Run policy-aware zsh tooling updates
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.zsh
+ExecStart=%h/.zsh/scripts/update-tools.sh --scheduled --no-plasma --no-vscode

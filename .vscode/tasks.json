@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "tools:update",
+      "type": "shell",
+      "command": "./scripts/update-tools.sh",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "tools:update:dry-run",
+      "type": "shell",
+      "command": "./scripts/update-tools.sh --dry-run",
+      "problemMatcher": []
+    },
+    {
+      "label": "tools:update:scheduled-safe",
+      "type": "shell",
+      "command": "./scripts/update-tools.sh --scheduled --no-plasma --no-vscode",
+      "problemMatcher": []
+    },
+    {
+      "label": "tools:install-user-timer",
+      "type": "shell",
+      "command": "./scripts/systemd/install-user-timer.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "tools:update:auto-timer",
+      "type": "shell",
+      "command": "./scripts/update-tools.sh --ensure-user-timer",
+      "problemMatcher": []
+    }
+  ]
+}

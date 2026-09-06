@@ -16,7 +16,7 @@ if [[ -o interactive ]]; then
   mkdir -p "${ZSH_COMPDUMP:h}" 2>/dev/null
 
   local -a _compinit_opts
-  _compinit_opts=(-d "$ZSH_COMPDUMP")
+  _compinit_opts=(-i -d "$ZSH_COMPDUMP")
 
   # Root shells often see ownership/mode warnings on shared completion paths.
   if (( EUID == 0 )); then

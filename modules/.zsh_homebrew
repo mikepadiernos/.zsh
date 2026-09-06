@@ -35,8 +35,8 @@ if [[ -n "$_brew_bin" ]]; then
       *":$HOMEBREW_PREFIX/opt/mysql-client/bin:"*) ;;
       *) export PATH="$HOMEBREW_PREFIX/opt/mysql-client/bin:$PATH" ;;
     esac
-  elif command -v mysql >/dev/null 2>&1 || [[ -d "$(command brew --prefix mysql-client 2>/dev/null)" ]]; then
-    export PATH="$(command brew --prefix mysql-client)/bin:$PATH"
+  elif command -v mysql >/dev/null 2>&1 || [[ -d "$($_brew_bin --prefix mysql-client 2>/dev/null)" ]]; then
+    export PATH="$($_brew_bin --prefix mysql-client 2>/dev/null)/bin:$PATH"
   fi
 
   # Apply tap-trust bypass only for force-bottle upgrades.

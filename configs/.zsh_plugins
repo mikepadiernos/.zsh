@@ -7,6 +7,8 @@ source_if_exists() {
 	[[ -f "$file" ]] && source "$file"
 }
 
+typeset -g ZSH_PLUGIN_AUTO_INSTALL_DEPENDENCIES="${ZSH_PLUGIN_AUTO_INSTALL_DEPENDENCIES:-false}"
+
 _zsh_is_root_shell() {
     if [[ "${ZSH_FORCE_ROOT_MODE:-false}" == "true" ]]; then
         return 0
@@ -90,6 +92,13 @@ _zsh_dependency_package_name() {
     esac
 }
 
+_zsh_mise_has_matching_package() {
+    local package_name="$1"
+
+    command -v mise >/dev/null 2>&1 || return 1
+    command mise ls-remote "$package_name" >/dev/null 2>&1
+}
+
 _zsh_install_missing_command() {
     local command_name="$1"
     local package_name=""
@@ -98,6 +107,8 @@ _zsh_install_missing_command() {
     local stamp_file="$cache_root/$command_name"
     local now="${EPOCHSECONDS:-$(date +%s)}"
     local last_try=""
+    local mise_has_match=false
+    local brew_allowed=false
 
     command -v "$command_name" >/dev/null 2>&1 && return 0
     package_name="$(_zsh_dependency_package_name "$command_name")"
@@ -109,7 +120,8 @@ _zsh_install_missing_command() {
         fi
     fi
 
-    if command -v mise >/dev/null 2>&1 && [[ "$command_name" != "mise" ]]; then
+    if [[ "$command_name" != "mise" ]] && _zsh_mise_has_matching_package "$package_name"; then
+        mise_has_match=true
         command mise use -g "${package_name}@latest" >/dev/null 2>&1 || true
         if command -v "$command_name" >/dev/null 2>&1; then
             rm -f "$stamp_file" >/dev/null 2>&1 || true
@@ -118,6 +130,14 @@ _zsh_install_missing_command() {
     fi
 
     if (( EUID != 0 )) && command -v brew >/dev/null 2>&1; then
+        if command -v mise >/dev/null 2>&1; then
+            [[ "$mise_has_match" == false ]] && brew_allowed=true
+        else
+            brew_allowed=true
+        fi
+    fi
+
+    if [[ "$brew_allowed" == true ]]; then
         command brew install "$package_name" >/dev/null 2>&1 || true
         if command -v "$command_name" >/dev/null 2>&1; then
             rm -f "$stamp_file" >/dev/null 2>&1 || true
@@ -219,12 +239,16 @@ _zsh_ensure_plugin_dependencies() {
     local plugin="$1"
     local dependency=""
     local -a dependencies=( )
+    local auto_install_enabled=false
 
     dependencies=( ${(@f)$(_zsh_plugin_dependencies "$plugin")} )
     (( ${#dependencies[@]} )) || return 0
 
+    zsh_startup_is_truthy "$ZSH_PLUGIN_AUTO_INSTALL_DEPENDENCIES" && auto_install_enabled=true
+
     for dependency in "${dependencies[@]}"; do
         if ! command -v "$dependency" >/dev/null 2>&1; then
+            [[ "$auto_install_enabled" == true ]] || continue
             echo "zsh_plugins: installing missing dependency '$dependency' for $plugin"
             _zsh_install_missing_command "$dependency" || {
                 echo "zsh_plugins: dependency install failed for $plugin: $dependency"
@@ -260,8 +284,11 @@ _zsh_prepare_abbr_dependency() {
     local standalone_dependency_file="$ZSH_PLUGINS/zsh-job-queue/zsh-job-queue.zsh"
     local dependency_file="$plugin_dir/zsh-job-queue/zsh-job-queue.zsh"
 
-    # Standalone zsh-job-queue plugin satisfies zsh-abbr dependency.
-    [[ -f "$standalone_dependency_file" ]] && return 0
+    # If standalone zsh-job-queue exists, link it where zsh-abbr expects it.
+    if [[ -f "$standalone_dependency_file" ]] && [[ ! -f "$dependency_file" ]]; then
+        mkdir -p "$plugin_dir/zsh-job-queue" 2>/dev/null || true
+        ln -sfn "$standalone_dependency_file" "$dependency_file" 2>/dev/null || true
+    fi
 
     [[ -f "$dependency_file" ]] && return 0
     [[ -f "$plugin_dir/.gitmodules" ]] || return 1
