@@ -1,0 +1,79 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+_zsh_themes_source_if_exists() {
+	[[ -f "$1" ]] && source "$1"
+}
+
+_zsh_themes_help() {
+	cat <<'EOF'
+zsh_themes [--theme NAME|-t NAME] [--list] [--help]
+
+Loads a zsh theme from the $ZSH_THEMES directory.
+Any file ending in .zsh-theme placed directly in that directory is available.
+The selected theme is loaded before the prompt so prompt scripts can use its colors.
+
+To add a new theme: drop a NAME.zsh-theme file into $ZSH_THEMES, then use --list.
+To set a default: export ZSH_THEME=NAME in .zshrc before sourcing .zsh_themes.
+
+Examples:
+	zsh_themes --theme none
+	zsh_themes --help
+EOF
+}
+
+zsh_themes() {
+	local theme_name="${ZSH_THEME:-none}"
+	local arg
+
+	while (( $# )); do
+		arg="$1"
+		shift
+		case "$arg" in
+			--theme|-t)
+				theme_name="${1:-}"
+				shift || true
+				;;
+			--theme=*)
+				theme_name="${arg#*=}"
+				;;
+			--list|-l)
+				printf '%s\n' none
+				return 0
+				;;
+			--help|-h)
+				_zsh_themes_help
+				return 0
+				;;
+			*)
+				theme_name="$arg"
+				;;
+		esac
+	done
+
+	if [[ -z "$theme_name" ]]; then
+		return 0
+	fi
+
+	case "$theme_name" in
+		none|off|disabled)
+			ZSH_THEME="none"
+			return 0
+			;;
+		typewritten|minimal)
+			ZSH_THEME="none"
+			return 0
+			;;
+	esac
+
+	local theme_file="$ZSH_THEMES/$theme_name.zsh-theme"
+	if [[ ! -f "$theme_file" ]]; then
+		echo "zsh_themes: theme '$theme_name' not found in $ZSH_THEMES"
+		echo "try: zsh_themes --list"
+		return 1
+	fi
+
+	ZSH_THEME="$theme_name"
+	_zsh_themes_source_if_exists "$theme_file"
+}
+
+zsh_themes --theme "${ZSH_THEME:-none}"

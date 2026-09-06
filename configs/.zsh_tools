@@ -1,0 +1,1765 @@
+# TOOLS
+
+_zsh_tools_mise_packages=(
+	android-sdk
+	argocd
+	atuin
+	aws-cli
+	azure-cli
+	bat
+	bat-extras
+	delta
+	docker-compose
+	direnv
+	eza
+	fd
+	fzf
+	gh
+	gitconfig
+	github-cli
+	helm
+	jq
+	kubectl
+	lazydocker
+	lazygit
+	lazyjournal
+	lazyssh
+	neovim
+	node
+	python
+	rclone
+	ripgrep
+	shellcheck
+	terraform
+	tmux
+	usage
+	yazi
+	zoxide
+)
+
+# Format: "<target path relative to HOME>|<source path relative to FILES>"
+_zsh_tools_custom_link_mappings=(
+	".config/Code/User/keybindings.json|.vscode/keybindings.json"
+	".config/Code/User/settings.json|.vscode/settings.json"
+	".config/atuin|.atuin"
+	".config/qutebrowser|.qute"
+	".config/copyq|.copyq"
+	".config/yazi|.yazi"
+	".config/lazygit|.lazygit"
+	".config/lazydocker|.lazydocker"
+	".config/gtk-nocsd-blacklist|.gtk-nocsd/config/gtk-nocsd-blacklist"
+	".local/share/atuin|.atuin/data"
+	".local/share/applications/filec.desktop|.gtk-nocsd/applications/filec.desktop"
+	".local/bin/gtk-nocsd-sync-shims|.gtk-nocsd/bin/gtk-nocsd-sync-shims"
+	".local/bin/gtk-nocsd-run|.gtk-nocsd/bin/gtk-nocsd-run"
+	".local/bin/filecentipede|.gtk-nocsd/shims/filecentipede"
+	".local/bin/filec|.gtk-nocsd/shims/filec"
+	".local/bin/fileu|.gtk-nocsd/shims/fileu"
+)
+
+# Non-app counterpart links that should be maintained as part of setup/update.
+# Format: "<target path relative to HOME>|<source path relative to FILES>"
+_zsh_tools_counterpart_link_mappings=(
+	".fzf|.fzf"
+	".zshrc|.zsh/.zshrc"
+)
+
+_zsh_tools_normalize_path() {
+	local path_value="$1"
+	path_value="${path_value:A}"
+	if [[ "$path_value" != "/" ]]; then
+		path_value="${path_value%/}"
+	fi
+	print -r -- "$path_value"
+}
+
+_zsh_tools_symlink_matches_source() {
+	local symlink_path="$1"
+	local source_path="$2"
+	local raw_target=""
+	local resolved_target=""
+	local normalized_target=""
+	local normalized_source=""
+
+	[[ -L "$symlink_path" ]] || return 1
+	raw_target="$(readlink "$symlink_path" 2>/dev/null)"
+	[[ -n "$raw_target" ]] || return 1
+
+	if [[ "$raw_target" == /* ]]; then
+		resolved_target="$raw_target"
+	else
+		resolved_target="${${symlink_path:h}/$raw_target:A}"
+	fi
+
+	normalized_target="$(_zsh_tools_normalize_path "$resolved_target")"
+	normalized_source="$(_zsh_tools_normalize_path "$source_path")"
+	[[ "$normalized_target" == "$normalized_source" ]]
+}
+
+_zsh_tools_link_path() {
+	local source_path="$1"
+	local target_path="$2"
+	local dry_run="$3"
+	local target_dir="${target_path:h}"
+	local current_target=""
+	local backup_path=""
+	local stamp="${EPOCHSECONDS:-$(date +%s)}"
+
+	if [[ ! -d "$target_dir" ]]; then
+		if (( dry_run )); then
+			echo "[dry-run] mkdir -p '$target_dir'"
+		else
+			mkdir -p "$target_dir" || return 1
+		fi
+	fi
+
+	if [[ -L "$target_path" ]]; then
+		current_target="$(readlink "$target_path" 2>/dev/null)"
+		if _zsh_tools_symlink_matches_source "$target_path" "$source_path"; then
+			return 0
+		fi
+
+		if (( dry_run )); then
+			echo "[dry-run] rm -f '$target_path' && ln -s '$source_path' '$target_path'"
+		else
+			rm -f "$target_path" || return 1
+			ln -s "$source_path" "$target_path" || return 1
+			echo "tools: linked $target_path -> $source_path"
+		fi
+		return 0
+	fi
+
+	if [[ -e "$target_path" ]]; then
+		backup_path="${target_path}.bak.${stamp}"
+		if (( dry_run )); then
+			echo "[dry-run] mv '$target_path' '$backup_path' && ln -s '$source_path' '$target_path'"
+		else
+			mv "$target_path" "$backup_path" || return 1
+			ln -s "$source_path" "$target_path" || return 1
+			echo "tools: backed up $target_path -> $backup_path"
+			echo "tools: linked $target_path -> $source_path"
+		fi
+		return 0
+	fi
+
+	if (( dry_run )); then
+		echo "[dry-run] ln -s '$source_path' '$target_path'"
+	else
+		ln -s "$source_path" "$target_path" || return 1
+		echo "tools: linked $target_path -> $source_path"
+	fi
+}
+
+_zsh_tools_setup_links() {
+	local dry_run="$1"
+	local files_root="${FILES:-$HOME/.files}"
+	local source_path
+	local entry_name
+	local target_path
+	local processed=0
+	local failed=0
+	local skipped=0
+
+	if [[ ! -d "$files_root" ]]; then
+		echo "tools: files root not found: $files_root"
+		return 1
+	fi
+
+	for source_path in "$files_root"/.*(N); do
+		entry_name="${source_path:t}"
+		case "$entry_name" in
+			.|..|.git|.gitignore)
+				continue
+				;;
+		esac
+
+		if [[ "$entry_name" == ".ddev" ]] && ! command -v ddev >/dev/null 2>&1; then
+			echo "tools: link skipped (missing app: ddev): $entry_name"
+			skipped=$((skipped + 1))
+			continue
+		fi
+
+		target_path="$HOME/$entry_name"
+		processed=$((processed + 1))
+		if ! _zsh_tools_link_path "$source_path" "$target_path" "$dry_run"; then
+			echo "tools: link failed for $entry_name"
+			failed=$((failed + 1))
+		fi
+	done
+
+	echo "tools: link setup processed=$processed skipped=$skipped failed=$failed"
+	(( failed == 0 )) || return 1
+	return 0
+}
+
+_zsh_tools_mapping_required_command() {
+	local target_rel="$1"
+
+	case "$target_rel" in
+		.config/Code/User/*)
+			print -r -- code
+			return 0
+			;;
+		.config/atuin|.local/share/atuin)
+			print -r -- atuin
+			return 0
+			;;
+		.config/qutebrowser)
+			print -r -- qutebrowser
+			return 0
+			;;
+		.config/copyq)
+			print -r -- copyq
+			return 0
+			;;
+		.config/yazi)
+			print -r -- yazi
+			return 0
+			;;
+		.config/lazygit)
+			print -r -- lazygit
+			return 0
+			;;
+		.config/lazydocker)
+			print -r -- lazydocker
+			return 0
+			;;
+		.config/gtk-nocsd-blacklist|.local/bin/gtk-nocsd-sync-shims|.local/bin/gtk-nocsd-run)
+			print -r -- gtk-nocsd
+			return 0
+			;;
+		.local/share/applications/filec.desktop|.local/bin/filecentipede|.local/bin/filec|.local/bin/fileu)
+			print -r -- filecentipede
+			return 0
+			;;
+		esac
+
+	return 1
+}
+
+_zsh_tools_app_is_installed() {
+	local app_name="$1"
+
+	# Primary check: executable available.
+	if command -v "$app_name" >/dev/null 2>&1; then
+		return 0
+	fi
+
+	# Handle package/executable naming mismatches.
+	case "$app_name" in
+		gtk-nocsd)
+			if command -v gtk-nocsd-run >/dev/null 2>&1; then
+				return 0
+			fi
+			if command -v gtk-nocsd-sync-shims >/dev/null 2>&1; then
+				return 0
+			fi
+			if command -v pacman >/dev/null 2>&1 && pacman -Q gtk-nocsd-git >/dev/null 2>&1; then
+				return 0
+			fi
+			if command -v paru >/dev/null 2>&1 && paru -Q gtk-nocsd-git >/dev/null 2>&1; then
+				return 0
+			fi
+			if command -v yay >/dev/null 2>&1 && yay -Q gtk-nocsd-git >/dev/null 2>&1; then
+				return 0
+			fi
+			;;
+		esac
+
+	return 1
+}
+
+_zsh_tools_should_skip_top_level_map_entry() {
+	local entry_name="$1"
+	local mapping
+	local target_rel
+	local source_rel
+
+	for mapping in "${_zsh_tools_custom_link_mappings[@]}"; do
+		target_rel="${mapping%%|*}"
+		source_rel="${mapping#*|}"
+
+		# Keep foundational top-level directories visible.
+		if [[ "$entry_name" == ".local" || "$entry_name" == ".config" ]]; then
+			continue
+		fi
+
+		if [[ "$source_rel" == "$entry_name" || "$source_rel" == "$entry_name"/* ]]; then
+			if [[ "$target_rel" != "$entry_name" && "$target_rel" != "$entry_name"/* ]]; then
+				return 0
+			fi
+		fi
+	done
+
+	return 1
+}
+
+_zsh_tools_top_level_entry_required_command() {
+	local entry_name="$1"
+	local mapping
+	local target_rel
+	local source_rel
+	local required_command
+
+	for mapping in "${_zsh_tools_custom_link_mappings[@]}"; do
+		target_rel="${mapping%%|*}"
+		source_rel="${mapping#*|}"
+
+		if [[ "$source_rel" == "$entry_name" || "$source_rel" == "$entry_name"/* ]]; then
+			required_command="$(_zsh_tools_mapping_required_command "$target_rel" 2>/dev/null)" || required_command=""
+			if [[ -n "$required_command" ]]; then
+				print -r -- "$required_command"
+				return 0
+			fi
+		fi
+	done
+
+	return 1
+}
+
+_zsh_tools_setup_custom_links() {
+	local dry_run="$1"
+	local missing_only="${2:-0}"
+	local files_root="${FILES:-$HOME/.files}"
+	local mapping
+	local target_rel
+	local source_rel
+	local target_path
+	local source_path
+	local processed=0
+	local failed=0
+	local skipped=0
+	local kept=0
+	local existing=0
+	local required_command=""
+
+	for mapping in "${_zsh_tools_custom_link_mappings[@]}"; do
+		target_rel="${mapping%%|*}"
+		source_rel="${mapping#*|}"
+		target_path="$HOME/$target_rel"
+		source_path="$files_root/$source_rel"
+		processed=$((processed + 1))
+
+		required_command=""
+		if required_command="$(_zsh_tools_mapping_required_command "$target_rel" 2>/dev/null)"; then
+			if ! _zsh_tools_app_is_installed "$required_command"; then
+				if [[ -L "$target_path" ]] && _zsh_tools_symlink_matches_source "$target_path" "$source_path"; then
+					echo "tools: custom link kept (app missing: $required_command): $target_rel"
+					kept=$((kept + 1))
+					continue
+				fi
+
+				echo "tools: custom link skipped (missing app: $required_command): $target_rel"
+				skipped=$((skipped + 1))
+				continue
+			fi
+		fi
+
+		if [[ ! -e "$source_path" && ! -L "$source_path" ]]; then
+			echo "tools: custom source missing, skipping: $source_path"
+			failed=$((failed + 1))
+			continue
+		fi
+
+		if (( missing_only )) && [[ -L "$target_path" || -e "$target_path" ]]; then
+			existing=$((existing + 1))
+			continue
+		fi
+
+		if ! _zsh_tools_link_path "$source_path" "$target_path" "$dry_run"; then
+			echo "tools: custom link failed for $target_rel"
+			failed=$((failed + 1))
+		fi
+	done
+
+	echo "tools: custom links processed=$processed kept=$kept skipped=$skipped existing=$existing failed=$failed"
+	(( failed == 0 )) || return 1
+	return 0
+}
+
+_zsh_tools_setup_counterpart_links() {
+	local dry_run="$1"
+	local missing_only="${2:-0}"
+	local files_root="${FILES:-$HOME/.files}"
+	local mapping
+	local target_rel
+	local source_rel
+	local target_path
+	local source_path
+	local processed=0
+	local failed=0
+	local existing=0
+
+	for mapping in "${_zsh_tools_counterpart_link_mappings[@]}"; do
+		target_rel="${mapping%%|*}"
+		source_rel="${mapping#*|}"
+		target_path="$HOME/$target_rel"
+		source_path="$files_root/$source_rel"
+		processed=$((processed + 1))
+
+		if [[ ! -e "$source_path" && ! -L "$source_path" ]]; then
+			echo "tools: counterpart source missing, skipping: $source_path"
+			failed=$((failed + 1))
+			continue
+		fi
+
+		if (( missing_only )) && [[ -L "$target_path" || -e "$target_path" ]]; then
+			existing=$((existing + 1))
+			continue
+		fi
+
+		if ! _zsh_tools_link_path "$source_path" "$target_path" "$dry_run"; then
+			echo "tools: counterpart link failed for $target_rel"
+			failed=$((failed + 1))
+		fi
+	done
+
+	echo "tools: counterpart links processed=$processed existing=$existing failed=$failed"
+	(( failed == 0 )) || return 1
+	return 0
+}
+
+_zsh_tools_list_tools() {
+	local tool
+	local -a system_tools
+
+	echo "tools: managed mise packages (${#_zsh_tools_mise_packages[@]})"
+	for tool in "${_zsh_tools_mise_packages[@]}"; do
+		echo "  - $tool"
+	done
+
+	echo "tools: runtime command availability"
+	system_tools=(
+		mise brew paru yay pacman apt flatpak fwupdmgr code kpackagetool6
+	)
+	for tool in "${system_tools[@]}"; do
+		if command -v "$tool" >/dev/null 2>&1; then
+			echo "  - $tool: available"
+		else
+			echo "  - $tool: missing"
+		fi
+	done
+}
+
+_zsh_tools_init_colors() {
+	if [[ ( -t 1 || "${ZSH_TOOLS_FORCE_COLOR:-0}" == "1" ) && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+		_ZSH_TOOLS_CLR_RESET=$'\033[0m'
+		_ZSH_TOOLS_CLR_HEADER=$'\033[1;36m'
+		_ZSH_TOOLS_CLR_OK=$'\033[1;32m'
+		_ZSH_TOOLS_CLR_WARN=$'\033[1;33m'
+		_ZSH_TOOLS_CLR_ERR=$'\033[1;31m'
+		_ZSH_TOOLS_CLR_INFO=$'\033[1;34m'
+	else
+		_ZSH_TOOLS_CLR_RESET=""
+		_ZSH_TOOLS_CLR_HEADER=""
+		_ZSH_TOOLS_CLR_OK=""
+		_ZSH_TOOLS_CLR_WARN=""
+		_ZSH_TOOLS_CLR_ERR=""
+		_ZSH_TOOLS_CLR_INFO=""
+	fi
+}
+
+_zsh_tools_repeat_char() {
+	local char="$1"
+	local count="$2"
+	local result=""
+
+	while (( count > 0 )); do
+		result+="$char"
+		count=$((count - 1))
+	done
+
+	print -r -- "$result"
+}
+
+_zsh_tools_truncate_cell() {
+	local value="$1"
+	local width="$2"
+
+	if (( width <= 3 )); then
+		print -r -- "${value[1,$width]}"
+		return 0
+	fi
+
+	if (( ${#value} > width )); then
+		print -r -- "${value[1,$((width - 3))]}..."
+	else
+		print -r -- "$value"
+	fi
+}
+
+_zsh_tools_status_color() {
+	local link_state="$1"
+	local notes="$2"
+
+	if [[ "$link_state" == linked* && "$notes" != *"missing"* && "$notes" != *"projected-missing"* ]]; then
+		print -r -- "$_ZSH_TOOLS_CLR_OK"
+		return 0
+	fi
+
+	if [[ "$link_state" == *missing* || "$link_state" == dangling || "$notes" == *"missing"* ]]; then
+		print -r -- "$_ZSH_TOOLS_CLR_ERR"
+		return 0
+	fi
+
+	if [[ "$link_state" == exists-not-link || "$notes" == *"projected-missing"* ]]; then
+		print -r -- "$_ZSH_TOOLS_CLR_WARN"
+		return 0
+	fi
+
+	if [[ "$link_state" == linked-other:* ]]; then
+		print -r -- "$_ZSH_TOOLS_CLR_INFO"
+		return 0
+	fi
+
+	print -r -- ""
+}
+
+_zsh_tools_table_print_header() {
+	local title="$1"
+	local w_source="$2"
+	local w_target="$3"
+	local w_state="$4"
+	local w_notes="$5"
+	local border=""
+
+	border="+-$( _zsh_tools_repeat_char "-" "$w_source" )-+-$( _zsh_tools_repeat_char "-" "$w_target" )-+-$( _zsh_tools_repeat_char "-" "$w_state" )-+-$( _zsh_tools_repeat_char "-" "$w_notes" )-+"
+
+	print -r -- "${_ZSH_TOOLS_CLR_HEADER}${title}${_ZSH_TOOLS_CLR_RESET}"
+	print -r -- "$border"
+	printf "| %-*s | %-*s | %-*s | %-*s |\n" \
+		"$w_source" "source" \
+		"$w_target" "target" \
+		"$w_state" "status" \
+		"$w_notes" "notes"
+	print -r -- "$border"
+}
+
+_zsh_tools_table_print_row() {
+	local source="$1"
+	local target="$2"
+	local link_state="$3"
+	local notes="$4"
+	local w_source="$5"
+	local w_target="$6"
+	local w_state="$7"
+	local w_notes="$8"
+	local line=""
+	local row_color=""
+
+	source="$(_zsh_tools_truncate_cell "$source" "$w_source")"
+	target="$(_zsh_tools_truncate_cell "$target" "$w_target")"
+	link_state="$(_zsh_tools_truncate_cell "$link_state" "$w_state")"
+	notes="$(_zsh_tools_truncate_cell "$notes" "$w_notes")"
+
+	printf -v line "| %-*s | %-*s | %-*s | %-*s |" \
+		"$w_source" "$source" \
+		"$w_target" "$target" \
+		"$w_state" "$link_state" \
+		"$w_notes" "$notes"
+
+	row_color="$(_zsh_tools_status_color "$link_state" "$notes")"
+	if [[ -n "$row_color" ]]; then
+		print -r -- "${row_color}${line}${_ZSH_TOOLS_CLR_RESET}"
+	else
+		print -r -- "$line"
+	fi
+}
+
+_zsh_tools_table_print_footer() {
+	local w_source="$1"
+	local w_target="$2"
+	local w_state="$3"
+	local w_notes="$4"
+
+	print -r -- "+-$( _zsh_tools_repeat_char "-" "$w_source" )-+-$( _zsh_tools_repeat_char "-" "$w_target" )-+-$( _zsh_tools_repeat_char "-" "$w_state" )-+-$( _zsh_tools_repeat_char "-" "$w_notes" )-+"
+}
+
+_zsh_tools_list_links() {
+	local files_root="${FILES:-$HOME/.files}"
+	local source_path
+	local entry_name
+	local target_path
+	local current_target
+	local state
+	local mapping
+	local target_rel
+	local source_rel
+	local custom_target
+	local custom_source
+	local custom_state
+	local required_command
+	local app_state
+	local nested_link
+	local nested_target_raw
+	local nested_target_abs
+	local home_projected_path
+	local home_state
+	local nested_state
+	local has_complex_links=0
+	local complex_count=0
+	local table_w_source=42
+	local table_w_target=42
+	local table_w_state=20
+	local table_w_notes=26
+
+	if [[ ! -d "$files_root" ]]; then
+		echo "tools: files root not found: $files_root"
+		return 1
+	fi
+
+	_zsh_tools_init_colors
+
+	_zsh_tools_table_print_header "tools: symlink map" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	for source_path in "$files_root"/.*(N); do
+		entry_name="${source_path:t}"
+		case "$entry_name" in
+			.|..|.git|.gitignore)
+				continue
+				;;
+		esac
+
+		target_path="$HOME/$entry_name"
+
+		if _zsh_tools_should_skip_top_level_map_entry "$entry_name"; then
+			required_command="$(_zsh_tools_top_level_entry_required_command "$entry_name" 2>/dev/null)" || required_command=""
+			if [[ -n "$required_command" ]] && _zsh_tools_app_is_installed "$required_command" && [[ -e "$target_path" && ! -L "$target_path" ]]; then
+				_zsh_tools_table_print_row "$source_path" "$target_path" "exists-not-link" "top-app;$required_command:ok" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+			fi
+			continue
+		fi
+
+		if [[ -L "$target_path" ]]; then
+			current_target="$(readlink "$target_path" 2>/dev/null)"
+			if _zsh_tools_symlink_matches_source "$target_path" "$source_path"; then
+				state="linked"
+			else
+				state="linked-other:$current_target"
+			fi
+		elif [[ -e "$target_path" ]]; then
+			state="exists-not-link"
+		else
+			continue
+		fi
+
+		_zsh_tools_table_print_row "$source_path" "$target_path" "$state" "top-level" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	done
+	_zsh_tools_table_print_footer "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+ 
+
+	_zsh_tools_table_print_header "tools: complex nested symlinks" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	for source_path in "$files_root"/.*(N); do
+		entry_name="${source_path:t}"
+		case "$entry_name" in
+			.|..|.git|.gitignore)
+				continue
+				;;
+		esac
+
+		[[ -d "$source_path" ]] || continue
+
+		while IFS= read -r nested_link; do
+			nested_target_raw="$(readlink "$nested_link" 2>/dev/null)"
+			[[ -n "$nested_target_raw" ]] || continue
+
+			if [[ "$nested_target_raw" == /* ]]; then
+				nested_target_abs="$nested_target_raw"
+			else
+				nested_target_abs="${${nested_link:h}/$nested_target_raw:A}"
+			fi
+
+			# Complex links are absolute or resolve outside their parent source tree.
+			if [[ "$nested_target_raw" != /* && "$nested_target_abs" == "$source_path"/* ]]; then
+				continue
+			fi
+
+			if [[ -e "$nested_link" ]]; then
+				nested_state="target-exists"
+			else
+				nested_state="dangling"
+			fi
+
+			home_projected_path="$HOME/${entry_name}${nested_link#$source_path}"
+			if [[ -L "$home_projected_path" || -e "$home_projected_path" ]]; then
+				home_state="projected-present"
+			else
+				home_state="projected-missing"
+			fi
+
+			_zsh_tools_table_print_row "$nested_link" "$nested_target_raw" "$nested_state" "$home_state" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+			has_complex_links=1
+			complex_count=$((complex_count + 1))
+		done < <(find "$source_path" -type l 2>/dev/null)
+	done
+
+	if (( ! has_complex_links )); then
+		_zsh_tools_table_print_row "none" "-" "empty" "no complex nested links" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	else
+		_zsh_tools_table_print_row "summary" "-" "found" "count=$complex_count" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	fi
+	_zsh_tools_table_print_footer "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+
+	_zsh_tools_table_print_header "tools: custom mapping symlinks" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	for mapping in "${_zsh_tools_custom_link_mappings[@]}"; do
+		target_rel="${mapping%%|*}"
+		source_rel="${mapping#*|}"
+		custom_target="$HOME/$target_rel"
+		custom_source="$files_root/$source_rel"
+		custom_state="missing"
+		required_command=""
+		app_state="app:n/a"
+
+		if required_command="$(_zsh_tools_mapping_required_command "$target_rel" 2>/dev/null)"; then
+			if _zsh_tools_app_is_installed "$required_command"; then
+				app_state="app:$required_command:installed"
+			else
+				app_state="app:$required_command:missing"
+			fi
+		fi
+
+		if [[ -L "$custom_target" ]]; then
+			current_target="$(readlink "$custom_target" 2>/dev/null)"
+			if _zsh_tools_symlink_matches_source "$custom_target" "$custom_source"; then
+				custom_state="linked"
+			else
+				custom_state="linked-other:$current_target"
+			fi
+		elif [[ -e "$custom_target" ]]; then
+			custom_state="exists-not-link"
+		fi
+
+		_zsh_tools_table_print_row "$custom_source" "$custom_target" "$custom_state" "$app_state" "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+	done
+	_zsh_tools_table_print_footer "$table_w_source" "$table_w_target" "$table_w_state" "$table_w_notes"
+}
+
+tools() {
+	local action_setup_links=0
+	local action_update=0
+	local action_list_tools=0
+	local action_list_links=0
+	local run_mise=1
+	local run_brew=1
+	local run_paru=1
+	local run_grub=1
+	local run_flatpak=1
+	local run_plasma=1
+	local plasma_strict_rate_limit=0
+	local run_firmware=1
+	local run_vscode=1
+	local dry_run=0
+	local is_ubuntu=0
+	local is_kde_plasma=0
+	local current_desktop=""
+	local grub_version_before=""
+	local grub_version_after=""
+	local grub_was_updated=0
+	local grub_cfg=""
+	local runtime_user="${ZSH_RUNTIME_USER:-${USER:-$(id -un 2>/dev/null || whoami 2>/dev/null || print -r -- unknown)}}"
+	local pass_entry="${ZSH_TOOLS_SUDO_PASS_ENTRY:-pass.local.sudo.${runtime_user}}"
+	local pass_entry_alt="${ZSH_TOOLS_SUDO_PASS_ENTRY_ALT:-local/sudo/${runtime_user}}"
+	local pass_entry_path=""
+	local pass_line=""
+	local sudo_keepalive_pid=""
+	local sudo_askpass_script=""
+	local sudo_askpass_secret_file=""
+	local -a plasmoid_args=()
+	local arg
+
+	for arg in "$@"; do
+		case "$arg" in
+			--list-tools)
+				action_list_tools=1
+				;;
+			--list-links)
+				action_list_links=1
+				;;
+			--setup-links)
+				action_setup_links=1
+				;;
+			--update)
+				action_update=1
+				;;
+			--mise-only)
+				run_brew=0
+				run_paru=0
+				run_grub=0
+				run_flatpak=0
+				run_plasma=0
+				run_firmware=0
+				;;
+			--brew-only)
+				run_mise=0
+				run_paru=0
+				run_grub=0
+				run_flatpak=0
+				run_plasma=0
+				run_firmware=0
+				;;
+			--no-brew)
+				run_brew=0
+				;;
+			--no-mise)
+				run_mise=0
+				;;
+			--no-paru)
+				run_paru=0
+				;;
+			--no-grub)
+				run_grub=0
+				;;
+			--no-flatpak)
+				run_flatpak=0
+				;;
+			--no-plasma)
+				run_plasma=0
+				;;
+			--plasma-strict-rate-limit)
+				plasma_strict_rate_limit=1
+				;;
+			--no-firmware)
+				run_firmware=0
+				;;
+			--system-only)
+				run_mise=0
+				run_brew=0
+				;;
+			--no-vscode)
+				run_vscode=0
+				;;
+			--dry-run)
+				dry_run=1
+				;;
+			--help|-h)
+				cat <<'EOF'
+	tools [--list-tools] [--list-links] [--setup-links] [--update] [--mise-only|--brew-only|--system-only] [--no-brew|--no-mise|--no-paru|--no-grub|--no-flatpak|--no-plasma|--plasma-strict-rate-limit|--no-firmware|--no-vscode] [--dry-run]
+
+Examples:
+	tools --list-tools
+	tools --list-links
+	tools --setup-links
+	tools --setup-links --dry-run
+	tools --update
+	tools --setup-links --update
+	tools --update --mise-only
+	tools --update --system-only
+	tools --update --no-grub
+	tools --update --plasma-strict-rate-limit
+	tools --update --no-firmware
+	tools --update --no-vscode
+	tools --update --dry-run
+EOF
+				return 0
+				;;
+			*)
+				echo "tools: unknown flag '$arg'"
+				echo "try: tools --help"
+				return 1
+				;;
+		esac
+	done
+
+	if (( ! action_list_tools && ! action_list_links && ! action_setup_links && ! action_update )); then
+		echo "tools: missing required action (--list-tools, --list-links, --setup-links, and/or --update)"
+		echo "try: tools --help"
+		return 1
+	fi
+
+	if (( action_list_tools )); then
+		_zsh_tools_list_tools
+	fi
+
+	if (( action_list_links )); then
+		if ! _zsh_tools_list_links; then
+			return 1
+		fi
+	fi
+
+	if (( ! action_setup_links && ! action_update )); then
+		return 0
+	fi
+
+	if (( action_setup_links )); then
+		if ! _zsh_tools_setup_links "$dry_run"; then
+			return 1
+		fi
+		if ! _zsh_tools_setup_counterpart_links "$dry_run"; then
+			return 1
+		fi
+		if ! _zsh_tools_setup_custom_links "$dry_run"; then
+			return 1
+		fi
+	fi
+
+	if (( ! action_update )); then
+		return 0
+	fi
+
+	if [[ -r /etc/os-release ]]; then
+		local os_id=""
+		os_id="$(grep '^ID=' /etc/os-release | head -n1 | cut -d= -f2 | tr -d '"')"
+		if [[ "$os_id" == "ubuntu" ]]; then
+			is_ubuntu=1
+		fi
+	fi
+
+	current_desktop="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}"
+	if [[ "$current_desktop" == *KDE* || "$current_desktop" == *Plasma* || -n "${KDE_FULL_SESSION:-}" ]]; then
+		is_kde_plasma=1
+	fi
+
+	if (( run_mise )); then
+		if (( dry_run )); then
+			echo "[dry-run] mise self-update -y"
+			echo "[dry-run] mise upgrade --bump"
+			echo "[dry-run] for tool in ${_zsh_tools_mise_packages[*]}; do mise use --global \"\$tool\" || echo SKIP: \"\$tool\"; done"
+		else
+			local -a mise_failed_packages=()
+
+			if ! mise self-update -y; then
+				echo "tools: mise self-update failed, continuing"
+			fi
+
+			if ! mise upgrade --bump; then
+				echo "tools: mise upgrade --bump failed, continuing"
+			fi
+
+			local mise_tool
+			for mise_tool in "${_zsh_tools_mise_packages[@]}"; do
+				if ! mise use --global "$mise_tool"; then
+					echo "tools: skipping problematic mise install: $mise_tool"
+					mise_failed_packages+=("$mise_tool")
+				fi
+			done
+
+			if (( ${#mise_failed_packages[@]} > 0 )); then
+				echo "tools: mise failed installs (${#mise_failed_packages[@]}): ${mise_failed_packages[*]}"
+			fi
+		fi
+	fi
+
+	if (( run_brew )); then
+		local -a bottled_formulae=()
+		local -a non_bottled_formulae=()
+		local brew_formula
+		local brew_info_json
+		local brew_has_bottle=0
+
+		if command -v brew >/dev/null 2>&1; then
+			for brew_formula in $(brew list --formula); do
+				brew_info_json="$(brew info --json=v2 "$brew_formula" 2>/dev/null)"
+				brew_has_bottle=0
+
+				if command -v jq >/dev/null 2>&1; then
+					if printf '%s\n' "$brew_info_json" | jq -e '.formulae[0].bottle.stable.files | type == "object" and (keys | length) > 0' >/dev/null 2>&1; then
+						brew_has_bottle=1
+					fi
+				elif [[ "$brew_info_json" == *'"bottle"'* && "$brew_info_json" != *'"files":{}'* ]]; then
+					brew_has_bottle=1
+				fi
+
+				if (( brew_has_bottle )); then
+					bottled_formulae+=("$brew_formula")
+				else
+					non_bottled_formulae+=("$brew_formula")
+				fi
+			done
+
+			if (( dry_run )); then
+				if (( ${#bottled_formulae[@]} > 0 )); then
+					echo "[dry-run] HOMEBREW_NO_ASK=1 brew upgrade --force-bottle --yes ${bottled_formulae[*]}"
+				fi
+				if (( ${#non_bottled_formulae[@]} > 0 )); then
+					echo "[dry-run] HOMEBREW_NO_ASK=1 brew upgrade --force --yes ${non_bottled_formulae[*]}"
+				fi
+				if (( ${#bottled_formulae[@]} == 0 && ${#non_bottled_formulae[@]} == 0 )); then
+					echo "[dry-run] brew list --formula (no formulae found)"
+				fi
+			else
+				if (( ${#bottled_formulae[@]} > 0 )); then
+					HOMEBREW_NO_ASK=1 brew upgrade --force-bottle --yes "${bottled_formulae[@]}"
+				fi
+				if (( ${#non_bottled_formulae[@]} > 0 )); then
+					HOMEBREW_NO_ASK=1 brew upgrade --force --yes "${non_bottled_formulae[@]}"
+				fi
+			fi
+		else
+			echo "tools: skipping brew update (brew not found)"
+		fi
+	fi
+
+	if (( run_paru && run_grub && ! dry_run )); then
+		if command -v pacman >/dev/null 2>&1; then
+			grub_version_before="$(pacman -Q grub 2>/dev/null | awk '{print $2}')"
+		fi
+	fi
+
+	if (( run_paru )); then
+		if (( dry_run )); then
+			echo "[dry-run] pass show $pass_entry (or $pass_entry_alt) | head -n1 | sudo -S -p '' -v"
+			echo "[dry-run] create temporary SUDO_ASKPASS helper for system package updates"
+			echo "[dry-run] start sudo keepalive during system package updates"
+		elif command -v sudo >/dev/null 2>&1; then
+			echo "tools: caching sudo credentials"
+
+			pass_entry_path="${pass_entry//.//}"
+			if [[ "$pass_entry_path" == pass/* ]]; then
+				pass_entry_path="${pass_entry_path#pass/}"
+			fi
+
+			if ! command -v pass >/dev/null 2>&1; then
+				echo "tools: pass is required for sudo auth but was not found"
+				return 1
+			fi
+
+			if pass show "$pass_entry" >/dev/null 2>&1; then
+				pass_line="$(pass show "$pass_entry" 2>/dev/null | head -n1)"
+				pass_entry_path="$pass_entry"
+			elif pass show "$pass_entry_path" >/dev/null 2>&1; then
+				pass_line="$(pass show "$pass_entry_path" 2>/dev/null | head -n1)"
+			elif pass show "$pass_entry_alt" >/dev/null 2>&1; then
+				pass_line="$(pass show "$pass_entry_alt" 2>/dev/null | head -n1)"
+				pass_entry_path="$pass_entry_alt"
+			else
+				echo "tools: could not read pass entry '$pass_entry' or '$pass_entry_path'"
+				echo "tools: ensure your pass store is unlocked first"
+				return 1
+			fi
+
+			if [[ -z "$pass_line" ]]; then
+				echo "tools: pass entry $pass_entry_path is empty"
+				return 1
+			fi
+
+			local sudo_bin="$(command -v sudo)"
+			printf '%s\n' "$pass_line" | env -u SUDO_ASKPASS "$sudo_bin" -S -p '' -v >/dev/null 2>&1 || {
+				echo "tools: sudo validation failed using pass entry $pass_entry_path"
+				return 1
+			}
+
+			sudo_askpass_secret_file="$(mktemp)"
+			printf '%s\n' "$pass_line" >"$sudo_askpass_secret_file"
+			chmod 600 "$sudo_askpass_secret_file"
+
+			sudo_askpass_script="$(mktemp)"
+			cat >"$sudo_askpass_script" <<EOF
+#!/usr/bin/env sh
+cat '$sudo_askpass_secret_file'
+EOF
+			chmod 700 "$sudo_askpass_script"
+
+			# Keep sudo timestamp fresh to avoid re-prompts during long updates.
+			(
+				while true; do
+					sudo -n true >/dev/null 2>&1 || exit 0
+					sleep 50
+				done
+			) >/dev/null 2>&1 &!
+			sudo_keepalive_pid="$!"
+		fi
+	fi
+
+	if (( run_paru )); then
+		if (( is_ubuntu )); then
+			if command -v apt >/dev/null 2>&1; then
+				if (( dry_run )); then
+					echo "[dry-run] sudo apt update && sudo apt upgrade -y"
+				else
+					if [[ -n "$sudo_askpass_script" ]]; then
+						SUDO_ASKPASS="$sudo_askpass_script" command sudo -A apt update && SUDO_ASKPASS="$sudo_askpass_script" command sudo -A apt upgrade -y
+					else
+						command sudo apt update && command sudo apt upgrade -y
+					fi
+				fi
+			else
+				echo "tools: skipping ubuntu update (apt not found)"
+			fi
+		elif command -v paru >/dev/null 2>&1; then
+			if (( dry_run )); then
+				echo "[dry-run] paru --sudoloop -Syu (with SUDO_ASKPASS when pass entry exists)"
+			else
+				if [[ -n "$sudo_askpass_script" ]]; then
+					SUDO_ASKPASS="$sudo_askpass_script" paru --sudoloop --sudo sudo --sudoflags "-A" -Syu
+				else
+					paru --sudoloop -Syu
+				fi
+			fi
+		elif command -v yay >/dev/null 2>&1; then
+			if (( dry_run )); then
+				echo "[dry-run] yay -Syu"
+			else
+				yay -Syu
+			fi
+		elif command -v pacman >/dev/null 2>&1; then
+			if (( dry_run )); then
+				echo "[dry-run] sudo pacman -Syu"
+			else
+				command sudo pacman -Syu
+			fi
+		else
+			echo "tools: skipping arch update (paru, yay, and pacman not found)"
+		fi
+	fi
+
+	if (( run_grub )); then
+		if (( dry_run )); then
+			echo "[dry-run] if grub package version changed, regenerate grub config"
+			echo "[dry-run] sudo grub-mkconfig -o /boot/grub/grub.cfg (or /boot/grub2/grub.cfg)"
+		elif (( ! run_paru )); then
+			echo "tools: skipping grub config refresh (system package update disabled)"
+		elif ! command -v pacman >/dev/null 2>&1; then
+			echo "tools: skipping grub config refresh (pacman not found)"
+		else
+			grub_version_after="$(pacman -Q grub 2>/dev/null | awk '{print $2}')"
+			if [[ -n "$grub_version_before" && -n "$grub_version_after" && "$grub_version_before" != "$grub_version_after" ]]; then
+				grub_was_updated=1
+			fi
+
+			if (( grub_was_updated )); then
+				if command -v grub-mkconfig >/dev/null 2>&1; then
+					if [[ -f /boot/grub/grub.cfg || -d /boot/grub ]]; then
+						grub_cfg="/boot/grub/grub.cfg"
+					elif [[ -f /boot/grub2/grub.cfg || -d /boot/grub2 ]]; then
+						grub_cfg="/boot/grub2/grub.cfg"
+					fi
+
+					if [[ -n "$grub_cfg" ]]; then
+						echo "tools: grub updated ($grub_version_before -> $grub_version_after), regenerating $grub_cfg"
+						if [[ -n "$sudo_askpass_script" ]]; then
+							SUDO_ASKPASS="$sudo_askpass_script" command sudo -A -v || {
+								echo "tools: sudo validation failed before grub config refresh"
+								return 1
+							}
+							SUDO_ASKPASS="$sudo_askpass_script" command sudo -A grub-mkconfig -o "$grub_cfg"
+						else
+							command sudo -v || {
+								echo "tools: sudo validation failed before grub config refresh"
+								return 1
+							}
+							command sudo grub-mkconfig -o "$grub_cfg"
+						fi
+					else
+						echo "tools: grub updated ($grub_version_before -> $grub_version_after), but no grub.cfg path found"
+						echo "tools: expected /boot/grub/grub.cfg or /boot/grub2/grub.cfg"
+					fi
+				else
+					echo "tools: grub updated ($grub_version_before -> $grub_version_after), but grub-mkconfig not found"
+				fi
+			else
+				if [[ -n "$grub_version_after" ]]; then
+					echo "tools: skipping grub config refresh (grub unchanged: $grub_version_after)"
+				else
+					echo "tools: skipping grub config refresh (grub package not installed)"
+				fi
+			fi
+		fi
+	fi
+
+	if [[ -n "$sudo_keepalive_pid" ]]; then
+		kill "$sudo_keepalive_pid" >/dev/null 2>&1 || true
+	fi
+
+	if [[ -n "$sudo_askpass_script" && -f "$sudo_askpass_script" ]]; then
+		rm -f "$sudo_askpass_script"
+	fi
+
+	if [[ -n "$sudo_askpass_secret_file" && -f "$sudo_askpass_secret_file" ]]; then
+		rm -f "$sudo_askpass_secret_file"
+	fi
+
+	if (( run_flatpak )); then
+		if command -v flatpak >/dev/null 2>&1; then
+			if (( dry_run )); then
+				echo "[dry-run] flatpak update -y"
+			else
+				flatpak update -y
+			fi
+		else
+			echo "tools: skipping flatpak update (flatpak not found)"
+		fi
+	fi
+
+	if (( run_plasma )); then
+		if (( plasma_strict_rate_limit )); then
+			plasmoid_args+=(--strict-rate-limit)
+		fi
+
+		if (( ! is_kde_plasma )); then
+			echo "tools: skipping plasmoid update (not running KDE Plasma)"
+		elif (( dry_run )); then
+			plasmoid_args+=(--dry-run)
+			plasmoids "${plasmoid_args[@]}"
+		else
+			if ! plasmoids "${plasmoid_args[@]}"; then
+				echo "tools: plasmoid update step failed"
+				return 1
+			fi
+		fi
+	fi
+
+	if (( run_firmware )); then
+		if command -v fwupdmgr >/dev/null 2>&1; then
+			if (( dry_run )); then
+				echo "[dry-run] fwupdmgr refresh --force --assume-yes || fwupdmgr refresh --force --no-metadata-check --assume-yes"
+				echo "[dry-run] fwupdmgr get-updates --assume-yes && fwupdmgr update --assume-yes"
+			else
+				fwupdmgr refresh --force --assume-yes || fwupdmgr refresh --force --no-metadata-check --assume-yes
+				fwupdmgr get-updates --assume-yes && fwupdmgr update --assume-yes
+			fi
+		else
+			echo "tools: skipping firmware update (fwupdmgr not found)"
+		fi
+	fi
+
+	if (( run_vscode )); then
+		if command -v code >/dev/null 2>&1; then
+			if (( dry_run )); then
+				echo "[dry-run] NODE_NO_WARNINGS=1 code --update-extensions"
+			else
+				NODE_NO_WARNINGS=1 code --update-extensions
+			fi
+		else
+			echo "tools: skipping vscode update (code not found)"
+		fi
+	fi
+
+	# After update runs, only create missing app-managed custom links.
+	if (( ! action_setup_links )); then
+		if ! _zsh_tools_setup_counterpart_links "$dry_run" 1; then
+			return 1
+		fi
+		if ! _zsh_tools_setup_custom_links "$dry_run" 1; then
+			return 1
+		fi
+	fi
+}
+
+_zsh_plugins_repo_name_from_url() {
+	local repo_url="$1"
+	local repo_name="${repo_url##*/}"
+	repo_name="${repo_name%.git}"
+	print -r -- "$repo_name"
+}
+
+_zsh_plugins_repo_owner_from_url() {
+	local repo_url="$1"
+	local path_part=""
+	local owner=""
+
+	if [[ "$repo_url" == git@*:*/* ]]; then
+		path_part="${repo_url#*:}"
+	elif [[ "$repo_url" == ssh://*/*/* ]]; then
+		path_part="${repo_url#ssh://*/}"
+	elif [[ "$repo_url" == http://*/*/* || "$repo_url" == https://*/*/* ]]; then
+		path_part="${repo_url#http://*/}"
+		path_part="${path_part#https://*/}"
+	else
+		path_part="$repo_url"
+	fi
+
+	owner="${path_part%%/*}"
+	[[ -n "$owner" && "$owner" != "$repo_url" ]] || return 1
+	print -r -- "$owner"
+}
+
+_zsh_plugins_is_fork_origin() {
+	local origin_url="$1"
+	local owner=""
+	local configured_owner
+	local -a configured_owners
+
+	# Optional direct URL regex for advanced matching.
+	if [[ -n "${ZSH_PLUGINS_FORK_URL_REGEX:-}" ]] && [[ "$origin_url" =~ ${~ZSH_PLUGINS_FORK_URL_REGEX} ]]; then
+		return 0
+	fi
+
+	owner="$(_zsh_plugins_repo_owner_from_url "$origin_url" 2>/dev/null)" || owner=""
+	[[ -n "$owner" ]] || return 1
+
+	# Exact owner list (comma-separated), default keeps previous behavior.
+	configured_owners=("${(@s:,:)ZSH_PLUGINS_FORK_OWNERS:-michaelpadiernos-forks}")
+	for configured_owner in "${configured_owners[@]}"; do
+		[[ -n "$configured_owner" ]] || continue
+		[[ "$owner" == "$configured_owner" ]] && return 0
+	done
+
+	# Owner regex fallback for cross-host naming conventions.
+	if [[ -n "${ZSH_PLUGINS_FORK_OWNER_REGEX:-}" ]]; then
+		[[ "$owner" =~ ${~ZSH_PLUGINS_FORK_OWNER_REGEX} ]]
+		return $?
+	fi
+
+	return 1
+}
+
+_zsh_plugins_default_remote_branch() {
+	local dir="$1"
+	local remote_name="$2"
+	local head_ref=""
+
+	head_ref="$(git -C "$dir" symbolic-ref --quiet --short "refs/remotes/$remote_name/HEAD" 2>/dev/null)" || head_ref=""
+	if [[ -n "$head_ref" ]]; then
+		print -r -- "$head_ref"
+		return 0
+	fi
+
+	if git -C "$dir" show-ref --verify --quiet "refs/remotes/$remote_name/main"; then
+		print -r -- "$remote_name/main"
+		return 0
+	fi
+
+	if git -C "$dir" show-ref --verify --quiet "refs/remotes/$remote_name/master"; then
+		print -r -- "$remote_name/master"
+		return 0
+	fi
+
+	return 1
+}
+
+_zsh_plugins_warn_fork_sync() {
+	local dir="$1"
+	local name="$2"
+	local origin_url=""
+	local upstream_url=""
+	local origin_branch=""
+	local upstream_branch=""
+	local counts=""
+	local upstream_only=0
+	local origin_only=0
+
+	origin_url="$(git -C "$dir" remote get-url origin 2>/dev/null)" || origin_url=""
+	[[ -n "$origin_url" ]] || return 0
+
+	if ! _zsh_plugins_is_fork_origin "$origin_url"; then
+		return 0
+	fi
+
+	upstream_url="$(git -C "$dir" remote get-url upstream 2>/dev/null)" || upstream_url=""
+	if [[ -z "$upstream_url" ]]; then
+		echo "zsh_plugins: warning: $name appears forked (origin -> $origin_url) but has no upstream remote"
+		echo "zsh_plugins: warning: add upstream to track sync, example: git -C '$dir' remote add upstream <original-repo-url>"
+		return 0
+	fi
+
+	origin_branch="$(_zsh_plugins_default_remote_branch "$dir" origin)" || return 0
+	upstream_branch="$(_zsh_plugins_default_remote_branch "$dir" upstream)" || return 0
+	counts="$(git -C "$dir" rev-list --left-right --count "$upstream_branch...$origin_branch" 2>/dev/null)" || return 0
+
+	upstream_only="${counts%%[[:space:]]*}"
+	origin_only="${counts##*[[:space:]]}"
+	[[ -n "$upstream_only" ]] || upstream_only=0
+	[[ -n "$origin_only" ]] || origin_only=0
+
+	if (( upstream_only > 0 )); then
+		echo "zsh_plugins: warning: $name fork is behind upstream by $upstream_only commit(s) ($origin_branch vs $upstream_branch)"
+		echo "zsh_plugins: warning: sync suggested before update: git -C '$dir' fetch upstream && git -C '$dir' merge --ff-only '$upstream_branch'"
+	fi
+
+	if (( origin_only > 0 )); then
+		echo "zsh_plugins: note: $name fork is ahead of upstream by $origin_only commit(s)"
+	fi
+}
+
+zsh_plugins() {
+	local action_install=0
+	local action_update=0
+	local action_check_forks=0
+	local do_fetch=1
+	local dry_run=0
+	local repos_file="${ZSH_PLUGINS}/git_repos.txt"
+	local plugins_dir="${ZSH_PLUGINS}"
+	local arg
+
+	for arg in "$@"; do
+		case "$arg" in
+			--install)
+				action_install=1
+				;;
+			--update)
+				action_update=1
+				;;
+			--check-forks)
+				action_check_forks=1
+				;;
+			--no-fetch)
+				do_fetch=0
+				;;
+			--dry-run)
+				dry_run=1
+				;;
+			--repos-file=*)
+				repos_file="${arg#*=}"
+				;;
+			--plugins-dir=*)
+				plugins_dir="${arg#*=}"
+				;;
+			--help|-h)
+				cat <<'EOF'
+zsh_plugins [--install] [--update] [--check-forks] [--no-fetch] [--dry-run] [--repos-file=PATH] [--plugins-dir=PATH]
+
+Actions:
+	--install       clone missing plugin repos listed in git_repos.txt
+	--update        fetch and fast-forward pull plugin repos
+	--check-forks   warn when forked plugin repos are missing upstream or behind upstream
+
+Options:
+	--no-fetch      skip fetch before fork checks/updates
+	--dry-run       print commands without changing repos
+	--repos-file    override plugin repo list file (default: $ZSH_PLUGINS/git_repos.txt)
+	--plugins-dir   override plugin root directory (default: $ZSH_PLUGINS)
+
+Fork detection env vars:
+	ZSH_PLUGINS_FORK_OWNERS       comma-separated owner list (default: michaelpadiernos-forks)
+	ZSH_PLUGINS_FORK_OWNER_REGEX  owner regex (optional)
+	ZSH_PLUGINS_FORK_URL_REGEX    full-url regex (optional)
+
+Examples:
+	zsh_plugins --install
+	zsh_plugins --update --check-forks
+	zsh_plugins --check-forks --dry-run
+	ZSH_PLUGINS_FORK_OWNERS='my-forks,team-forks' zsh_plugins --check-forks
+	ZSH_PLUGINS_FORK_OWNER_REGEX='(fork|forks)$' zsh_plugins --check-forks
+EOF
+				return 0
+				;;
+			*)
+				echo "zsh_plugins: unknown flag '$arg'"
+				echo "try: zsh_plugins --help"
+				return 1
+				;;
+		esac
+	done
+
+	if (( ! action_install && ! action_update && ! action_check_forks )); then
+		echo "zsh_plugins: no action selected"
+		echo "try: zsh_plugins --help"
+		return 1
+	fi
+
+	if [[ ! -d "$plugins_dir" ]]; then
+		echo "zsh_plugins: plugin directory not found: $plugins_dir"
+		return 1
+	fi
+
+	if [[ ! -r "$repos_file" ]]; then
+		echo "zsh_plugins: repo list not readable: $repos_file"
+		return 1
+	fi
+
+	local line repo_url repo_name repo_dir
+	local processed=0
+	local installed=0
+	local updated=0
+	local failed=0
+	local missing=0
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%%#*}"
+		line="${line#"${line%%[![:space:]]*}"}"
+		line="${line%"${line##*[![:space:]]}"}"
+		[[ -n "$line" ]] || continue
+
+		repo_url="$line"
+		repo_name="$(_zsh_plugins_repo_name_from_url "$repo_url")"
+		repo_dir="$plugins_dir/$repo_name"
+		processed=$((processed + 1))
+
+		if (( action_install )) && [[ ! -d "$repo_dir/.git" ]]; then
+			if (( dry_run )); then
+				echo "[dry-run] git clone '$repo_url' '$repo_dir'"
+			else
+				if git clone "$repo_url" "$repo_dir" >/dev/null 2>&1; then
+					installed=$((installed + 1))
+				else
+					echo "zsh_plugins: install failed: $repo_name"
+					failed=$((failed + 1))
+					continue
+				fi
+			fi
+		fi
+
+		if [[ ! -d "$repo_dir/.git" ]]; then
+			if (( action_update || action_check_forks )); then
+				echo "zsh_plugins: missing plugin repo: $repo_name (run --install)"
+				missing=$((missing + 1))
+			fi
+			continue
+		fi
+
+		if (( do_fetch )) && (( action_update || action_check_forks )); then
+			if (( dry_run )); then
+				echo "[dry-run] git -C '$repo_dir' fetch --all --prune"
+			else
+				if ! git -C "$repo_dir" fetch --all --prune >/dev/null 2>&1; then
+					echo "zsh_plugins: fetch failed: $repo_name"
+					failed=$((failed + 1))
+				fi
+			fi
+		fi
+
+		if (( action_check_forks )); then
+			_zsh_plugins_warn_fork_sync "$repo_dir" "$repo_name"
+		fi
+
+		if (( action_update )); then
+			local current_branch
+			current_branch="$(git -C "$repo_dir" symbolic-ref --short -q HEAD 2>/dev/null)" || current_branch=""
+			if [[ -z "$current_branch" ]]; then
+				echo "zsh_plugins: skip update (detached HEAD): $repo_name"
+				continue
+			fi
+
+			if (( dry_run )); then
+				echo "[dry-run] git -C '$repo_dir' pull --ff-only origin '$current_branch'"
+			else
+				if git -C "$repo_dir" pull --ff-only origin "$current_branch" >/dev/null 2>&1; then
+					updated=$((updated + 1))
+				else
+					echo "zsh_plugins: update failed: $repo_name"
+					failed=$((failed + 1))
+				fi
+			fi
+		fi
+	done < "$repos_file"
+
+	echo "zsh_plugins: processed=$processed installed=$installed updated=$updated missing=$missing failed=$failed"
+	(( failed == 0 )) || return 1
+	return 0
+}
+
+alias zsh-plugins='zsh_plugins'
+
+	plasmoids() {
+		local dry_run=0
+		local prune_retired=0
+		local strict_rate_limit=0
+		local arg
+		local registry_file="$HOME/.local/share/knewstuff3/plasmoids.knsregistry"
+		local applet_root="$HOME/.local/share/plasma/plasmoids/"
+		local tmp_dir=""
+		local registry_dump=""
+		local request_spacing_seconds=1
+		local processed_count=0
+		local updated_count=0
+		local failed_count=0
+		local skipped_count=0
+		local pruned_count=0
+		local rate_limited_count=0
+		local -a retired_indexes=()
+
+		for arg in "$@"; do
+			case "$arg" in
+				--dry-run)
+					dry_run=1
+					;;
+				--prune-retired)
+					prune_retired=1
+					;;
+				--strict-rate-limit)
+					strict_rate_limit=1
+					;;
+				--help|-h)
+					cat <<-'EOF'
+	plasmoids [--dry-run] [--prune-retired] [--strict-rate-limit]
+
+	Download and upgrade installed Plasma applets from the local KNewStuff registry.
+	This stays terminal-only and does not open Discover.
+	Use --prune-retired to remove entries whose payload URLs return HTTP 404/410.
+	HTTP 429 is treated as deferred by default; use --strict-rate-limit to fail on it.
+EOF
+					return 0
+					;;
+				*)
+					echo "plasmoids: unknown flag '$arg'"
+					echo "try: plasmoids --help"
+					return 1
+					;;
+			esac
+		done
+
+		if [[ ! -r "$registry_file" ]]; then
+			echo "plasmoids: registry not found: $registry_file"
+			return 1
+		fi
+
+		if ! command -v kpackagetool6 >/dev/null 2>&1; then
+			echo "plasmoids: kpackagetool6 not found"
+			return 1
+		fi
+
+		if ! command -v curl >/dev/null 2>&1; then
+			echo "plasmoids: curl not found"
+			return 1
+		fi
+
+		tmp_dir="$(mktemp -d)"
+		registry_dump="$(mktemp)"
+		python - "$registry_file" >"$registry_dump" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+registry_file = sys.argv[1]
+root = ET.parse(registry_file).getroot()
+
+for idx, stuff in enumerate(root.findall('./stuff')):
+    payload = (stuff.findtext('payload') or '').strip()
+    installed_file = (stuff.findtext('installedfile') or '').strip()
+    status = (stuff.findtext('status') or '').strip().lower()
+    name = (stuff.findtext('name') or '').strip()
+    if status != 'installed':
+        continue
+    if not payload or not installed_file:
+        continue
+    print(f'{idx}\t{name}\t{payload}\t{installed_file}')
+PY
+
+		if (( dry_run && prune_retired )); then
+			echo "plasmoids: note --prune-retired has no effect with --dry-run"
+		fi
+
+		while IFS=$'\t' read -r stuff_index package_name payload_url installed_file; do
+			[[ -n "$payload_url" && -n "$installed_file" ]] || continue
+			local installed_dir="${installed_file%/}"
+			local metadata_file="$installed_dir/metadata.json"
+
+			# Keep to true Plasma applets at the standard metadata location.
+			[[ "$installed_dir" == "$applet_root"* ]] || continue
+			[[ "$installed_dir" == *"/contents/"* ]] && continue
+			[[ "$installed_dir" == *".disabled."* ]] && continue
+			[[ -f "$metadata_file" ]] || continue
+
+			local payload_name="${payload_url##*/}"
+			local payload_path="$tmp_dir/$payload_name"
+			local http_code=""
+			local curl_exit=0
+			local attempt=0
+			local max_attempts=3
+			local sleep_seconds=2
+
+			if (( dry_run )); then
+				echo "[dry-run] curl -L --fail --output '$payload_path' '$payload_url' && kpackagetool6 --type Plasma/Applet --upgrade '$payload_path'"
+				continue
+			fi
+
+			if (( processed_count > 0 )); then
+				sleep "$request_spacing_seconds"
+			fi
+			processed_count=$((processed_count + 1))
+
+			while (( attempt < max_attempts )); do
+				attempt=$((attempt + 1))
+				http_code="$(curl -L --silent --show-error --output "$payload_path" --write-out '%{http_code}' "$payload_url")"
+				curl_exit=$?
+
+				if (( curl_exit == 0 )) && [[ "$http_code" != "429" ]]; then
+					break
+				fi
+
+				if (( attempt < max_attempts )); then
+					if [[ "$http_code" == "429" ]]; then
+						echo "plasmoids: rate limited for $package_name (HTTP 429), retrying in ${sleep_seconds}s (attempt $attempt/$max_attempts)"
+					else
+						echo "plasmoids: temporary download error for $package_name, retrying in ${sleep_seconds}s (attempt $attempt/$max_attempts)"
+					fi
+					sleep "$sleep_seconds"
+					sleep_seconds=$((sleep_seconds * 2))
+				fi
+			done
+
+			if (( curl_exit != 0 )); then
+				if [[ "$http_code" == "429" ]]; then
+					echo "plasmoids: deferred $package_name due to HTTP 429 after $max_attempts attempts"
+					rate_limited_count=$((rate_limited_count + 1))
+					if (( strict_rate_limit )); then
+						failed_count=$((failed_count + 1))
+					fi
+					rm -f "$payload_path"
+					continue
+				fi
+
+				echo "plasmoids: download failed for $package_name"
+				failed_count=$((failed_count + 1))
+				continue
+			fi
+
+			if [[ "$http_code" == "410" || "$http_code" == "404" ]]; then
+				echo "plasmoids: skipped retired package $package_name (HTTP $http_code)"
+				skipped_count=$((skipped_count + 1))
+				if (( prune_retired )) && [[ -n "$stuff_index" ]]; then
+					retired_indexes+=("$stuff_index")
+				fi
+				rm -f "$payload_path"
+				continue
+			fi
+
+			if [[ "$http_code" == "429" ]]; then
+				echo "plasmoids: deferred $package_name due to HTTP 429 after $max_attempts attempts"
+				rate_limited_count=$((rate_limited_count + 1))
+				if (( strict_rate_limit )); then
+					failed_count=$((failed_count + 1))
+				fi
+				rm -f "$payload_path"
+				continue
+			fi
+
+			if [[ "$http_code" != 2* ]]; then
+				echo "plasmoids: download failed for $package_name (HTTP $http_code)"
+				failed_count=$((failed_count + 1))
+				rm -f "$payload_path"
+				continue
+			fi
+
+			if ! kpackagetool6 --type Plasma/Applet --upgrade "$payload_path" >/dev/null 2>&1; then
+				echo "plasmoids: upgrade failed for $package_name"
+				failed_count=$((failed_count + 1))
+				continue
+			fi
+
+			updated_count=$((updated_count + 1))
+		done < "$registry_dump"
+
+		if (( prune_retired && ! dry_run && ${#retired_indexes[@]} > 0 )); then
+			python - "$registry_file" "${retired_indexes[@]}" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+registry_file = sys.argv[1]
+to_remove = {int(x) for x in sys.argv[2:] if x.isdigit()}
+if not to_remove:
+    raise SystemExit(0)
+
+tree = ET.parse(registry_file)
+root = tree.getroot()
+stuff_nodes = root.findall('./stuff')
+
+for idx in sorted(to_remove, reverse=True):
+    if 0 <= idx < len(stuff_nodes):
+        root.remove(stuff_nodes[idx])
+
+tree.write(registry_file, encoding='utf-8', xml_declaration=True)
+PY
+			pruned_count=${#retired_indexes[@]}
+			echo "plasmoids: pruned $pruned_count retired registry entr$( (( pruned_count == 1 )) && echo 'y' || echo 'ies' )"
+		fi
+
+		if [[ -n "$tmp_dir" && -d "$tmp_dir" ]]; then
+			rm -rf "$tmp_dir"
+		fi
+
+		if [[ -n "$registry_dump" && -f "$registry_dump" ]]; then
+			rm -f "$registry_dump"
+		fi
+
+		if (( failed_count > 0 )); then
+			echo "plasmoids: updated $updated_count package(s), $skipped_count skipped, $pruned_count pruned, $rate_limited_count rate-limited, $failed_count failed"
+			return 1
+		fi
+
+		if (( rate_limited_count > 0 )); then
+			echo "plasmoids: note $rate_limited_count package(s) were deferred due to HTTP 429; rerun later to retry"
+		fi
+
+		echo "plasmoids: updated $updated_count package(s), $skipped_count skipped, $pruned_count pruned, $rate_limited_count rate-limited"
+	}
+
+# END TOOLS

@@ -1,0 +1,326 @@
+#!/bin/zsh
+## ZSH_PLUGINS
+## ---
+
+source_if_exists() {
+	local file="$1"
+	[[ -f "$file" ]] && source "$file"
+}
+
+_zsh_is_root_shell() {
+    if [[ "${ZSH_FORCE_ROOT_MODE:-false}" == "true" ]]; then
+        return 0
+    fi
+
+    (( EUID == 0 ))
+}
+
+_zsh_plugin_repo_url_from_manifest() {
+    local plugin="$1"
+    local repos_file="$ZSH_PLUGINS/git_repos.txt"
+    local line=""
+    local repo_url=""
+    local repo_name=""
+
+    [[ -r "$repos_file" ]] || return 1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n "$line" ]] || continue
+
+        repo_url="$line"
+        repo_name="${repo_url:t}"
+        repo_name="${repo_name%.git}"
+        [[ "$repo_name" == "$plugin" ]] || continue
+
+        print -r -- "$repo_url"
+        return 0
+    done < "$repos_file"
+
+    return 1
+}
+
+_zsh_plugin_entry_file() {
+    local plugin="$1"
+    local plugin_dir="$ZSH_PLUGINS/$plugin"
+    local plugin_file="$plugin_dir/$plugin.plugin.zsh"
+    local -a candidates=( )
+
+    if [[ -f "$plugin_file" ]]; then
+        print -r -- "$plugin_file"
+        return 0
+    fi
+
+    candidates=( "$plugin_dir"/*.plugin.zsh(N) )
+    (( ${#candidates[@]} )) || return 1
+    print -r -- "${candidates[1]}"
+    return 0
+}
+
+_zsh_dependency_package_name() {
+    local command_name="$1"
+
+    case "$command_name" in
+        git)
+            print -r -- git
+            ;;
+        fzf)
+            print -r -- fzf
+            ;;
+        eza)
+            print -r -- eza
+            ;;
+        delta)
+            print -r -- delta
+            ;;
+        mise)
+            print -r -- mise
+            ;;
+        docker)
+            print -r -- docker
+            ;;
+        docker-compose)
+            print -r -- docker-compose
+            ;;
+        *)
+            print -r -- "$command_name"
+            ;;
+    esac
+}
+
+_zsh_install_missing_command() {
+    local command_name="$1"
+    local package_name=""
+    local cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/dependency-install-attempts"
+    local retry_seconds="${ZSH_PLUGIN_DEPENDENCY_RETRY_SECONDS:-21600}"
+    local stamp_file="$cache_root/$command_name"
+    local now="${EPOCHSECONDS:-$(date +%s)}"
+    local last_try=""
+
+    command -v "$command_name" >/dev/null 2>&1 && return 0
+    package_name="$(_zsh_dependency_package_name "$command_name")"
+
+    if [[ -r "$stamp_file" ]]; then
+        read -r last_try < "$stamp_file" || last_try=""
+        if [[ -n "$last_try" ]] && (( now - last_try < retry_seconds )); then
+            return 1
+        fi
+    fi
+
+    if command -v mise >/dev/null 2>&1 && [[ "$command_name" != "mise" ]]; then
+        command mise use -g "${package_name}@latest" >/dev/null 2>&1 || true
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    if (( EUID != 0 )) && command -v brew >/dev/null 2>&1; then
+        command brew install "$package_name" >/dev/null 2>&1 || true
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    if (( EUID != 0 )) && command -v paru >/dev/null 2>&1; then
+        command paru -S --noconfirm --needed "$package_name" >/dev/null 2>&1 || true
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    if command -v dnf5 >/dev/null 2>&1; then
+        if (( EUID == 0 )); then
+            command dnf5 install -y "$package_name" >/dev/null 2>&1 || true
+        elif command -v sudo >/dev/null 2>&1; then
+            command sudo -n dnf5 install -y "$package_name" >/dev/null 2>&1 || true
+        fi
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    if command -v dnf >/dev/null 2>&1; then
+        if (( EUID == 0 )); then
+            command dnf install -y "$package_name" >/dev/null 2>&1 || true
+        elif command -v sudo >/dev/null 2>&1; then
+            command sudo -n dnf install -y "$package_name" >/dev/null 2>&1 || true
+        fi
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    if command -v yum >/dev/null 2>&1; then
+        if (( EUID == 0 )); then
+            command yum install -y "$package_name" >/dev/null 2>&1 || true
+        elif command -v sudo >/dev/null 2>&1; then
+            command sudo -n yum install -y "$package_name" >/dev/null 2>&1 || true
+        fi
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    if command -v apt-get >/dev/null 2>&1; then
+        if (( EUID == 0 )); then
+            DEBIAN_FRONTEND=noninteractive command apt-get install -y "$package_name" >/dev/null 2>&1 || true
+        elif command -v sudo >/dev/null 2>&1; then
+            command sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y "$package_name" >/dev/null 2>&1 || true
+        fi
+        if command -v "$command_name" >/dev/null 2>&1; then
+            rm -f "$stamp_file" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    mkdir -p "$cache_root" >/dev/null 2>&1 || true
+    print -r -- "$now" >| "$stamp_file" 2>/dev/null || true
+
+    return 1
+}
+
+_zsh_plugin_dependencies() {
+    local plugin="$1"
+
+    case "$plugin" in
+        zsh-abbr)
+            print -r -- git
+            ;;
+        zsh-fzf-plugin|zsh-fzf-git-branches)
+            print -r -- git
+            print -r -- fzf
+            ;;
+        zsh-eza)
+            print -r -- eza
+            ;;
+        zsh-magic-dashboard)
+            print -r -- git
+            print -r -- delta
+            print -r -- eza
+            ;;
+        zsh-mise)
+            print -r -- mise
+            ;;
+        zsh-docker-helpers)
+            print -r -- docker
+            ;;
+    esac
+}
+
+_zsh_ensure_plugin_dependencies() {
+    local plugin="$1"
+    local dependency=""
+    local -a dependencies=( )
+
+    dependencies=( ${(@f)$(_zsh_plugin_dependencies "$plugin")} )
+    (( ${#dependencies[@]} )) || return 0
+
+    for dependency in "${dependencies[@]}"; do
+        if ! command -v "$dependency" >/dev/null 2>&1; then
+            echo "zsh_plugins: installing missing dependency '$dependency' for $plugin"
+            _zsh_install_missing_command "$dependency" || {
+                echo "zsh_plugins: dependency install failed for $plugin: $dependency"
+                return 1
+            }
+        fi
+    done
+
+    return 0
+}
+
+_zsh_install_plugin_if_missing() {
+    local plugin="$1"
+    local plugin_dir="$ZSH_PLUGINS/$plugin"
+    local plugin_file=""
+    local repo_url=""
+
+    plugin_file="$(_zsh_plugin_entry_file "$plugin")" && return 0
+    command -v git >/dev/null 2>&1 || return 1
+
+    repo_url="$(_zsh_plugin_repo_url_from_manifest "$plugin")" || return 1
+    mkdir -p "$ZSH_PLUGINS" || return 1
+
+    echo "zsh_plugins: installing missing plugin: $plugin"
+    command git clone "$repo_url" "$plugin_dir" >/dev/null 2>&1 || return 1
+
+    plugin_file="$(_zsh_plugin_entry_file "$plugin")" || return 1
+    [[ -f "$plugin_file" ]]
+}
+
+_zsh_prepare_abbr_dependency() {
+    local plugin_dir="$ZSH_PLUGINS/zsh-abbr"
+    local dependency_file="$plugin_dir/zsh-job-queue/zsh-job-queue.zsh"
+
+    [[ -f "$dependency_file" ]] && return 0
+    [[ -f "$plugin_dir/.gitmodules" ]] || return 1
+    command -v git >/dev/null 2>&1 || return 1
+
+    # Fresh clones may miss zsh-abbr submodules; attempt quiet bootstrap once.
+    command git -C "$plugin_dir" submodule update --init --recursive >/dev/null 2>&1 || return 1
+    [[ -f "$dependency_file" ]]
+}
+
+source_plugin() {
+    local plugin="$1"
+    local plugin_file=""
+
+    # Root shells on VPS are kept minimal to avoid plugin side effects/noise.
+    if _zsh_is_root_shell && [[ "${ZSH_ROOT_LOAD_ALL_PLUGINS:-false}" != "true" ]]; then
+        case "$plugin" in
+            zsh-autocompletion|zsh-drupal|zsh-fzf-git-branches|zsh-fzf-plugin|zsh-fzf-tab|zsh-magic-dashboard|zsh-you-should-use)
+    			return 0
+    			;;
+    	esac
+    fi
+
+    plugin_file="$(_zsh_plugin_entry_file "$plugin")" || true
+    if [[ -z "$plugin_file" ]]; then
+		_zsh_install_plugin_if_missing "$plugin" || return 0
+        plugin_file="$(_zsh_plugin_entry_file "$plugin")" || return 0
+	fi
+
+    _zsh_ensure_plugin_dependencies "$plugin" || return 0
+
+    if [[ "$plugin" == "zsh-abbr" ]]; then
+        _zsh_prepare_abbr_dependency || return 0
+    fi
+
+    source_if_exists "$plugin_file"
+}
+
+# composer
+# ddev
+# gh
+# git
+# lando-alias-zsh
+# zeza
+# zsh-alias-finder
+
+source_plugin "zsh-abbr"                                                                          # zsh-abbr
+source_plugin "zsh-autocompletion"                                                                # zsh-autocompletion
+source_plugin "zsh-autosuggestions"                                                               # zsh-autosuggestions
+source_plugin "zsh-colors"                                                                        # zsh-colors
+source_plugin "zsh-completions"                                                                   # zsh-completions
+source_plugin "zsh-doas-zsh-plugin"                                                               # zsh-doas-zsh-plugin
+# source_plugin "zsh-docker-helpers"                                                              # moved to modules/.zsh_docker
+source_plugin "zsh-drupal"                                                                        # zsh-drupal
+source_plugin "zsh-eza"                                                                           # zsh-eza
+source_plugin "zsh-F-Sy-H"                                                                        # zsh-F-Sy-H
+source_plugin "zsh-figures"                                                                       # zsh-figures
+source_plugin "zsh-fzf-git-branches"                                                              # zsh-fzf-git-branches
+source_plugin "zsh-fzf-plugin"                                                                    # zsh-fzf-plugin
+source_plugin "zsh-fzf-tab"                                                                       # zsh-fzf-tab
+source_plugin "zsh-magic-dashboard"                                                               # zsh-magic-dashboard
+source_plugin "zsh-ssh"                                                                           # zsh-ssh
+source_plugin "zsh-you-should-use"                                                                # zsh-you-should-use
+
+## ---
+## END ZSH_PLUGINS

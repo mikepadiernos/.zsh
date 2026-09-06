@@ -1,0 +1,278 @@
+# GIT
+
+# --- gitenv symlinks ----------------------------------------------------------
+
+_zsh_git_symlink() {
+	local src="$1"
+	local dest="$2"
+
+	[[ -e "$src" ]] || return 0
+
+	if [[ -L "$dest" ]]; then
+		# Repoint stale links (e.g. left over from another profile/home).
+		[[ "$(readlink "$dest")" == "$src" ]] && return 0
+		rm -f "$dest"
+	elif [[ -e "$dest" ]]; then
+		mv "$dest" "${dest}.bak"
+		echo "zsh_git: backup ${dest} -> ${dest}.bak"
+	fi
+
+	ln -s "$src" "$dest"
+	echo "zsh_git: linked ${dest} -> ${src}"
+}
+
+_zsh_git_setup_gitenv() {
+	local gitenv="${DOTFILES:+$DOTFILES/.gitenv}"
+	gitenv="${gitenv:-${HOME}/.files/.gitenv}"
+
+	[[ -d "$gitenv" ]] || return 0
+
+	# Configs live in a per-user profile dir because credential helper paths
+	# are absolute and therefore home-specific.
+	local profile="${GITENV_PROFILE:-${USER:-$(id -un)}}"
+	local dir="${gitenv}/${profile}"
+	if [[ ! -d "$dir" ]]; then
+		local -a profile_candidates
+		profile_candidates=("$gitenv"/*(/N))
+		(( ${#profile_candidates[@]} > 0 )) || return 0
+		dir="${profile_candidates[1]}"
+	fi
+
+	local name
+	for name in .gitconfig .gitconfig-personal .gitconfig-work; do
+		_zsh_git_symlink "${dir}/${name}" "${HOME}/${name}"
+	done
+}
+
+_zsh_git_disable_broken_vscode_askpass() {
+	# VS Code exports temporary askpass env vars. If the IPC socket is gone,
+	# git fails before credential helpers run.
+	if [[ -n "${VSCODE_GIT_IPC_HANDLE:-}" ]] && [[ ! -S "${VSCODE_GIT_IPC_HANDLE}" ]]; then
+		unset GIT_ASKPASS
+		unset SSH_ASKPASS
+		unset VSCODE_GIT_ASKPASS_NODE
+		unset VSCODE_GIT_ASKPASS_MAIN
+		unset VSCODE_GIT_ASKPASS_EXTRA_ARGS
+		unset VSCODE_GIT_IPC_HANDLE
+		export GIT_TERMINAL_PROMPT=1
+		[[ -n "$GIT_SETUP_VERBOSE" ]] && echo "zsh_git: disabled stale VS Code askpass env"
+	fi
+}
+
+_zsh_git_setup_pass_entries() {
+	# Initialize pass entries if needed
+	if command -v pass >/dev/null 2>&1; then
+		local ghp_rewrite
+		ghp_rewrite="$(git config --global --get-all 'url.https://github.com/.insteadof' 2>/dev/null)"
+
+		# Only require a GitHub PAT pass entry when gh-p resolves to HTTPS.
+		if grep -qx 'gh-p:' <<< "$ghp_rewrite"; then
+			if [[ -n "$GIT_SETUP_VERBOSE" ]]; then
+				echo "zsh_git: GitHub HTTPS auth uses pass entries by owner."
+				echo "  entry format: github.com/<owner>"
+				echo "  secret format:"
+				echo "    <PAT>"
+				echo "    username=<github-username>"
+				echo "  example: pass insert -m github.com/my-org"
+			fi
+		fi
+
+		# Ensure gpg key passphrase entry exists (optional)
+		if ! pass show gpg/key-passphrase >/dev/null 2>&1; then
+			if [[ -n "$GIT_SETUP_VERBOSE" ]]; then
+				echo "zsh_git: gpg/key-passphrase not in pass — create it:"
+				echo "  pass insert gpg/key-passphrase"
+				echo "  (then paste your GPG key passphrase)"
+			fi
+		fi
+	fi
+}
+
+_zsh_git_disable_broken_vscode_askpass
+_zsh_git_setup_gitenv
+_zsh_git_setup_pass_entries
+unset -f _zsh_git_setup_pass_entries
+
+# --- mergetool ----------------------------------------------------------------
+
+_zsh_git_pick_mergetool() {
+	local tool
+	for tool in nvimdiff vimdiff meld kdiff3; do
+		local bin="${tool%diff}"
+		[[ "$tool" == "nvimdiff" ]] && bin="nvim"
+		[[ "$tool" == "vimdiff"  ]] && bin="vim"
+		command -v "$bin" >/dev/null 2>&1 && echo "$tool" && return 0
+	done
+	return 1
+}
+
+_zsh_git_setup_mergetool() {
+	local configured_tool selected_tool
+
+	configured_tool="$(git config --global --get merge.tool 2>/dev/null)"
+	[[ -n "$configured_tool" ]] && return 0
+
+	selected_tool="$(_zsh_git_pick_mergetool)" || return 0
+
+	git config --global merge.tool         "$selected_tool"
+	git config --global mergetool.prompt   false
+	git config --global mergetool.keepBackup false
+
+	[[ -n "$GIT_SETUP_VERBOSE" ]] && \
+		zsh_startup_log "\e[30;42m GIT \e[0m" "\e[32mmerge.tool set to $selected_tool\e[0m"
+}
+
+_zsh_git_setup_mergetool
+unset -f _zsh_git_pick_mergetool _zsh_git_setup_mergetool
+
+# --- git/pass helpers --------------------------------------------------------
+
+git-pass-save() {
+	command -v git >/dev/null 2>&1 || { echo "git-pass-save: git not found"; return 1; }
+	command -v pass >/dev/null 2>&1 || { echo "git-pass-save: pass not found"; return 1; }
+
+	local remote url host host_short repo_path owner username pat
+	local entry_user entry_owner entry_repo entry_repo_raw entry_user_short entry_owner_short entry_repo_short entry_repo_raw_short
+	remote="${1:-origin}"
+
+	url="$(git remote get-url "$remote" 2>/dev/null)" || {
+		echo "git-pass-save: remote '$remote' not found"
+		return 1
+	}
+
+	if [[ "$url" == https://* ]]; then
+		host="${url#https://}"
+		host="${host%%/*}"
+		repo_path="${url#https://$host/}"
+	elif [[ "$url" == http://* ]]; then
+		host="${url#http://}"
+		host="${host%%/*}"
+		repo_path="${url#http://$host/}"
+	else
+		echo "git-pass-save: remote is not HTTP(S): $url"
+		return 1
+	fi
+
+	host_short="${host%%.*}"
+
+	owner="${repo_path%%/*}"
+	owner="${owner%.git}"
+	if [[ -z "$owner" ]]; then
+		echo "git-pass-save: unable to derive owner from remote: $url"
+		return 1
+	fi
+
+	read -r "username?GitHub username: "
+	username="$(printf '%s' "$username" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+	if [[ -z "$username" ]]; then
+		echo "git-pass-save: username is required"
+		return 1
+	fi
+
+	echo -n "GitHub PAT (hidden): "
+	read -rs pat
+	echo
+	pat="$(printf '%s' "$pat" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+	if [[ -z "$pat" ]]; then
+		echo "git-pass-save: PAT is required"
+		return 1
+	fi
+
+	entry_owner="${host}/${owner}"
+	entry_user="${host}/${username}"
+	entry_repo="${host}/${repo_path%.git}"
+	entry_repo_raw="${host}/${repo_path}"
+	entry_owner_short="${host_short}/${owner}"
+	entry_user_short="${host_short}/${username}"
+	entry_repo_short="${host_short}/${repo_path%.git}"
+	entry_repo_raw_short="${host_short}/${repo_path}"
+
+	printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_owner" >/dev/null || return 1
+	printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_user" >/dev/null || return 1
+	printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_repo" >/dev/null || return 1
+	printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_repo_raw" >/dev/null || return 1
+	if [[ "$host_short" != "$host" ]]; then
+		printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_owner_short" >/dev/null || return 1
+		printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_user_short" >/dev/null || return 1
+		printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_repo_short" >/dev/null || return 1
+		printf '%s\nusername=%s\n' "$pat" "$username" | pass insert -m -f "$entry_repo_raw_short" >/dev/null || return 1
+	fi
+
+	echo "git-pass-save: saved credentials to pass entries:"
+	echo "  $entry_owner"
+	echo "  $entry_user"
+	echo "  $entry_repo"
+	echo "  $entry_repo_raw"
+	if [[ "$host_short" != "$host" ]]; then
+		echo "  $entry_owner_short"
+		echo "  $entry_user_short"
+		echo "  $entry_repo_short"
+		echo "  $entry_repo_raw_short"
+	fi
+	echo "git-pass-save: now run: git credential-cache exit && git push"
+}
+
+# --- dynamic identity ---------------------------------------------------------
+
+_zsh_git_sync_identity() {
+	command -v git >/dev/null 2>&1 || return 0
+	git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+	local repo_root remote_url state now
+	now="${EPOCHSECONDS:-0}"
+
+	repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+	remote_url="$(git config --get remote.origin.url 2>/dev/null)"
+	state="$repo_root|$remote_url"
+
+	if [[ "$state" == "$__ZSH_GIT_SYNC_LAST_STATE" ]] && (( now - ${__ZSH_GIT_SYNC_LAST_EPOCH:-0} < ${ZSH_GIT_SYNC_DEBOUNCE_SECONDS:-3} )); then
+		return 0
+	fi
+
+	typeset -g __ZSH_GIT_SYNC_LAST_STATE="$state"
+	typeset -gi __ZSH_GIT_SYNC_LAST_EPOCH="$now"
+
+	local target_name target_email
+
+	local default_user
+	local default_email
+	default_user="${ZSH_RUNTIME_USER:-${USER:-$(id -un 2>/dev/null || print -r -- user)}}"
+	default_email="$(git config --global --get user.email 2>/dev/null)"
+	[[ -n "$default_email" ]] || default_email="${default_user}@localhost"
+
+	if [[ "$repo_root" == "$HOME/Library/Projects/work"/* ]] || [[ "$remote_url" == *"ge-aero/"* ]]; then
+		target_name="${ZSH_GIT_WORK_NAME:-${ZSH_GIT_DEFAULT_NAME:-$default_user}}"
+		target_email="${ZSH_GIT_WORK_EMAIL:-${ZSH_GIT_DEFAULT_EMAIL:-$default_email}}"
+	else
+		target_name="${ZSH_GIT_PERSONAL_NAME:-${ZSH_GIT_DEFAULT_NAME:-$default_user}}"
+		target_email="${ZSH_GIT_PERSONAL_EMAIL:-${ZSH_GIT_DEFAULT_EMAIL:-$default_email}}"
+	fi
+
+	local current_name current_email
+	current_name="$(git config --local --get user.name 2>/dev/null || true)"
+	current_email="$(git config --local --get user.email 2>/dev/null || true)"
+
+	[[ "$current_name" == "$target_name" ]] || git config --local user.name "$target_name"
+	[[ "$current_email" == "$target_email" ]] || git config --local user.email "$target_email"
+}
+
+if [[ -o interactive ]] && whence -w add-zsh-hook >/dev/null 2>&1; then
+	typeset -gi ZSH_GIT_SYNC_DEBOUNCE_SECONDS="${ZSH_GIT_SYNC_DEBOUNCE_SECONDS:-3}"
+	typeset -g ZSH_GIT_SYNC_ON_PRECMD="${ZSH_GIT_SYNC_ON_PRECMD:-false}"
+	add-zsh-hook chpwd _zsh_git_sync_identity
+	if zsh_startup_is_truthy "$ZSH_GIT_SYNC_ON_PRECMD"; then
+		add-zsh-hook precmd _zsh_git_sync_identity
+	fi
+	_zsh_git_sync_identity
+fi
+
+# Reusable entry point for tools launched outside the zsh hooks (lazygit, etc.)
+git-env-sync() {
+	_zsh_git_disable_broken_vscode_askpass
+	_zsh_git_setup_gitenv
+	_zsh_git_sync_identity
+	[[ -t 0 ]] && export GPG_TTY="$(tty)"
+	return 0
+}
+
+# END GIT

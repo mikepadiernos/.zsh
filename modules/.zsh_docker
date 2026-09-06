@@ -1,0 +1,349 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+typeset -g ZSH_DOCKER_COLIMA_PROFILE="${ZSH_DOCKER_COLIMA_PROFILE:-default}"
+typeset -g ZSH_DOCKER_AUTO_START="${ZSH_DOCKER_AUTO_START:-false}"
+typeset -g ZSH_DOCKER_WRAP_COMMANDS="${ZSH_DOCKER_WRAP_COMMANDS:-false}"
+typeset -g ZSH_DOCKER_SYNC_CONTEXT="${ZSH_DOCKER_SYNC_CONTEXT:-true}"
+typeset -g ZSH_DOCKER_CONTEXT_NAME="${ZSH_DOCKER_CONTEXT_NAME:-colima}"
+
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+export COMPOSE_DOCKER_CLI_BUILD="${COMPOSE_DOCKER_CLI_BUILD:-1}"
+
+_zsh_docker_helpers_plugin_dir="$ZSH_PLUGINS/zsh-docker-helpers"
+if [[ -d "$_zsh_docker_helpers_plugin_dir/bin" ]]; then
+	path+=("$_zsh_docker_helpers_plugin_dir/bin")
+fi
+unset _zsh_docker_helpers_plugin_dir
+
+_zsh_docker_can_run() {
+	command -v docker >/dev/null 2>&1 || return 1
+	command docker info >/dev/null 2>&1
+}
+
+_zsh_docker_apply_colima_env() {
+	command -v colima >/dev/null 2>&1 || return 1
+	eval "$(command colima docker-env --shell zsh 2>/dev/null)" || return 1
+	return 0
+}
+
+_zsh_docker_sync_context() {
+	zsh_startup_is_truthy "$ZSH_DOCKER_SYNC_CONTEXT" || return 0
+	command -v docker >/dev/null 2>&1 || return 1
+	command -v colima >/dev/null 2>&1 || return 1
+
+	local current_context=""
+	current_context="$(command docker context show 2>/dev/null)" || return 1
+	[[ "$current_context" == "$ZSH_DOCKER_CONTEXT_NAME" ]] && return 0
+
+	command docker context use "$ZSH_DOCKER_CONTEXT_NAME" >/dev/null 2>&1 || return 1
+	return 0
+}
+
+_zsh_docker_colima_running() {
+	command -v colima >/dev/null 2>&1 || return 1
+	command colima status --profile "$ZSH_DOCKER_COLIMA_PROFILE" >/dev/null 2>&1
+}
+
+_zsh_docker_start_colima() {
+	command -v colima >/dev/null 2>&1 || return 1
+	command colima start --profile "$ZSH_DOCKER_COLIMA_PROFILE" >/dev/null 2>&1 || return 1
+	_zsh_docker_apply_colima_env
+}
+
+_zsh_docker_ensure_runtime() {
+	_zsh_docker_can_run && return 0
+
+	# If Colima is available, refresh docker env and retry before attempting a start.
+	if _zsh_docker_apply_colima_env; then
+		_zsh_docker_sync_context >/dev/null 2>&1 || true
+		_zsh_docker_can_run && return 0
+	fi
+
+	if zsh_startup_is_truthy "$ZSH_DOCKER_AUTO_START"; then
+		if ! _zsh_docker_colima_running; then
+			zsh_startup_log '\e[30;46m DOCKER \e[0m' "\e[36mstarting colima profile '$ZSH_DOCKER_COLIMA_PROFILE'\e[0m"
+		fi
+		_zsh_docker_start_colima >/dev/null 2>&1 || return 1
+		_zsh_docker_sync_context >/dev/null 2>&1 || true
+		_zsh_docker_can_run && return 0
+	fi
+
+	return 1
+}
+
+_zsh_docker_cli() {
+	_zsh_docker_ensure_runtime || return 1
+	command docker "$@"
+}
+
+_zsh_docker_compose() {
+	_zsh_docker_ensure_runtime || return 1
+	if command -v docker-compose >/dev/null 2>&1; then
+		command docker-compose "$@"
+		return $?
+	fi
+	command docker compose "$@"
+}
+
+_zsh_docker_compose_v2() {
+	_zsh_docker_ensure_runtime || return 1
+	command docker compose "$@"
+}
+
+docker_runtime() {
+	if _zsh_docker_ensure_runtime; then
+		echo "docker runtime: ready"
+		return 0
+	fi
+
+	echo "docker runtime: unavailable"
+	echo "hint: install/start colima or enable auto-start with ZSH_DOCKER_AUTO_START=true"
+	return 1
+}
+
+dkr() {
+	docker_runtime
+}
+
+unalias d dkd dki dkl dco dcp dcup dcdown dcps dkb d-ip d-grep d-kill-pattern d-pid d-purge d-stats d-stop d-zsh dps-monitor d-alpine d-busybox d-debian d-centos d-centos6 d-fedora d-ubuntu lzdc docker-tags docker_stack docker-daemonize docker-interactive docker-last dockerbuild dockerimages dockerps d-cp >/dev/null 2>&1 || true
+
+alias d='docker'
+alias dkd='docker run -d -P'
+alias dki='docker run -t -i -P'
+alias dkl='docker ps -l -q'
+alias docker-daemonize='docker run -d -P'
+alias docker-interactive='docker run -t -i -P'
+alias docker-last='docker ps -l -q'
+alias dockerbuild='docker build'
+alias dockerimages='docker images'
+alias dockerps='docker ps'
+alias d-cp='dcp'
+
+d-ip() {
+	_zsh_docker_cli inspect --format "{{ .NetworkSettings.IPAddress }}" "$1"
+}
+
+dkb() {
+	_zsh_docker_cli build -t="$1" .
+}
+
+d-grep() {
+	_zsh_docker_cli ps | grep "$@" | grep -v '^CONTAINER'
+}
+
+d-kill-pattern() {
+	_zsh_docker_cli ps |
+		grep "$@" |
+		grep -v '^CONTAINER' |
+		awk '{print $1}' |
+		xargs -rI % sh -c 'docker kill "$1" >/dev/null && echo "$1 killed"' _ %
+}
+
+d-pid() {
+	_zsh_docker_cli inspect --format "{{ .State.Pid }}" "$1"
+}
+
+d-purge() {
+	local -a ids
+	ids=("${(@f)$(_zsh_docker_cli ps -a -q)}")
+	(( ${#ids[@]} )) || return 0
+	_zsh_docker_cli rm "${ids[@]}"
+}
+
+d-stats() {
+	_zsh_docker_cli stats
+}
+
+d-stop() {
+	local -a ids
+	ids=("${(@f)$(_zsh_docker_cli ps -a -q)}")
+	(( ${#ids[@]} )) || return 0
+	_zsh_docker_cli stop "${ids[@]}"
+}
+
+d-zsh() {
+	local tag="$1"
+	[[ -n "$tag" ]] || {
+		echo "d-zsh: usage: d-zsh <image>"
+		return 1
+	}
+	_zsh_docker_cli run -v /tmp:/host_tmp:rw -it "$tag" /bin/zsh
+}
+
+dps-monitor() {
+	while true; do
+		clear
+		_zsh_docker_cli ps | cut -c -"$(tput cols 2>/dev/null || echo 120)"
+		sleep 0.5
+	done
+}
+
+d-alpine() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it alpine:latest /bin/sh
+}
+
+d-busybox() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it busybox:latest /bin/sh
+}
+
+d-debian() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it debian:latest /bin/bash
+}
+
+d-centos() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it centos:centos7 /bin/bash
+}
+
+d-centos6() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it centos:centos6 /bin/bash
+}
+
+d-fedora() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it fedora:20 /bin/bash
+}
+
+d-ubuntu() {
+	_zsh_docker_cli run -v "$PWD":/shared --rm -it ubuntu:14.04 /bin/bash
+}
+
+docker-tags() {
+	command curl -fsSL "https://registry.hub.docker.com/v2/repositories/$@/tags/" | command jq '."results"[] ["name"]' | sort
+}
+
+dco() {
+	_zsh_docker_compose_v2 "$@"
+}
+
+dcp() {
+	_zsh_docker_compose "$@"
+}
+
+dcup() {
+	_zsh_docker_compose_v2 up -d "$@"
+}
+
+dcdown() {
+	_zsh_docker_compose_v2 down "$@"
+}
+
+dcps() {
+	_zsh_docker_compose_v2 ps "$@"
+}
+
+lzdc() {
+	_zsh_docker_ensure_runtime || return 1
+	command -v lazydocker >/dev/null 2>&1 || {
+		echo "lazydocker: command not found"
+		return 1
+	}
+	command lazydocker "$@"
+}
+
+docker_stack() {
+	if [[ "$1" == "--help" || "$1" == "-h" || "$1" == "help" || -z "$1" ]]; then
+		cat <<'EOF'
+docker_stack <command> [args]
+
+Commands:
+	runtime|status   Verify Docker runtime readiness (Colima-aware)
+	context          Show current Docker context
+	up [args]        docker compose up -d [args]
+	down [args]      docker compose down [args]
+	ps [args]        docker compose ps [args]
+	lzd [args]       Launch lazydocker with runtime check
+	doctor           Verify colima, docker, compose, lazydocker
+	help             Show this help
+
+Env toggles:
+	ZSH_DOCKER_AUTO_START=true      Auto-start colima when runtime is unavailable
+	ZSH_DOCKER_COLIMA_PROFILE=name  Colima profile to use (default: default)
+	ZSH_DOCKER_SYNC_CONTEXT=true     Keep Docker context aligned with colima
+	ZSH_DOCKER_WRAP_COMMANDS=true    Wrap docker/docker-compose/lazydocker commands
+EOF
+		return 0
+	fi
+
+	case "$1" in
+		up)
+			shift
+			dcup "$@"
+			;;
+		down)
+			shift
+			dcdown "$@"
+			;;
+		ps)
+			shift
+			dcps "$@"
+			;;
+		lzd|lazydocker)
+			shift
+			lzdc "$@"
+			;;
+		runtime|status)
+			docker_runtime
+			;;
+		context)
+			_zsh_docker_ensure_runtime || return 1
+			command docker context show
+			;;
+		doctor)
+			local fail=0
+			local -a checks=( colima docker lazydocker )
+			local item=""
+			for item in "${checks[@]}"; do
+				if command -v "$item" >/dev/null 2>&1; then
+					echo "[ok] $item"
+				else
+					echo "[missing] $item"
+					fail=1
+				fi
+			done
+
+			if command -v docker >/dev/null 2>&1 && command docker compose version >/dev/null 2>&1; then
+				echo "[ok] docker compose"
+			elif command -v docker-compose >/dev/null 2>&1; then
+				echo "[ok] docker-compose"
+			else
+				echo "[missing] docker compose"
+				fail=1
+			fi
+
+			if command -v docker >/dev/null 2>&1; then
+				command docker context show >/dev/null 2>&1 && echo "[ok] docker context" || echo "[warn] docker context unavailable"
+			fi
+
+			return "$fail"
+			;;
+		*)
+			echo "docker_stack: unknown command '$1'"
+			echo "try: docker_stack --help"
+			return 1
+			;;
+	esac
+}
+
+if zsh_startup_is_truthy "$ZSH_DOCKER_WRAP_COMMANDS"; then
+	docker() {
+		_zsh_docker_ensure_runtime || return 1
+		command docker "$@"
+	}
+
+	docker-compose() {
+		_zsh_docker_ensure_runtime || return 1
+		if command -v docker-compose >/dev/null 2>&1; then
+			command docker-compose "$@"
+			return $?
+		fi
+		command docker compose "$@"
+	}
+
+	lazydocker() {
+		_zsh_docker_ensure_runtime || return 1
+		command lazydocker "$@"
+	}
+fi
+
+# Prime environment on startup when colima is installed.
+_zsh_docker_apply_colima_env >/dev/null 2>&1 || true
+_zsh_docker_sync_context >/dev/null 2>&1 || true

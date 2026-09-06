@@ -1,0 +1,29 @@
+function _drush_in_ddev {
+  command -v ddev >/dev/null 2>&1 && [[ -f .ddev/config.yaml ]]
+}
+
+function _drush_load {
+  zsh_startup_log "\e[30;42m DRUSH \e[0m" "\e[32mavailable via ddev\e[0m"
+  function den  { ddev drush -y en "$@"; }
+  function dun  { ddev drush -y pmu "$@"; }
+  function dcr  { ddev drush -y cr "$@"; }
+  function dcri { ddev drush -y cr && ddev drush -y updb && ddev drush -y cim && ddev drush -y cr; }
+  function dcrx { ddev drush -y cr && ddev drush -y updb && ddev drush -y cex && ddev drush -y cr; }
+}
+
+function _drush_unload {
+  unfunction den dun dcr dcri dcrx 2>/dev/null
+}
+
+function _drush_chpwd {
+  if _drush_in_ddev; then
+    _drush_load
+  else
+    _drush_unload
+  fi
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _drush_chpwd
+_drush_chpwd
+

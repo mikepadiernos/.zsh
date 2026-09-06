@@ -1,0 +1,124 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+typeset -g ZSH_PYTHON_AUTO_VENV="${ZSH_PYTHON_AUTO_VENV:-true}"
+typeset -gi ZSH_PYTHON_STATUS_DEBOUNCE_SECONDS="${ZSH_PYTHON_STATUS_DEBOUNCE_SECONDS:-2}"
+typeset -g __ZSH_PYTHON_LAST_PWD=""
+typeset -gi __ZSH_PYTHON_LAST_CHECK_EPOCH=0
+
+_zsh_python_deactivate_current() {
+  if [[ -n "$VIRTUAL_ENV" ]] && (( $+functions[deactivate] )); then
+    deactivate >/dev/null 2>&1
+  fi
+}
+
+_zsh_python_find_venv_root() {
+  local dir="$PWD"
+
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/.venv/bin/activate" ]]; then
+      print -r -- "$dir"
+      return 0
+    fi
+
+    dir="${dir:h}"
+  done
+
+  return 1
+}
+
+_zsh_python_should_refresh() {
+  local now="${EPOCHSECONDS:-0}"
+
+  if [[ "$PWD" != "$__ZSH_PYTHON_LAST_PWD" ]]; then
+    __ZSH_PYTHON_LAST_PWD="$PWD"
+    __ZSH_PYTHON_LAST_CHECK_EPOCH="$now"
+    return 0
+  fi
+
+  if (( now - __ZSH_PYTHON_LAST_CHECK_EPOCH >= ZSH_PYTHON_STATUS_DEBOUNCE_SECONDS )); then
+    __ZSH_PYTHON_LAST_CHECK_EPOCH="$now"
+    return 0
+  fi
+
+  return 1
+}
+
+_zsh_python_status() {
+  local project_root
+  local venv_path
+  local state
+
+  _zsh_python_should_refresh || return 0
+
+  if [[ "$ZSH_PYTHON_AUTO_VENV" != "true" ]]; then
+    typeset -g __ZSH_PYTHON_LAST_STATE="disabled"
+    return 0
+  fi
+
+  project_root="$(_zsh_python_find_venv_root)" || {
+    _zsh_python_deactivate_current
+
+    typeset -g __ZSH_PYTHON_LAST_STATE=""
+    return 0
+  }
+
+  venv_path="$project_root/.venv"
+  state="$venv_path"
+  [[ "$state" == "$__ZSH_PYTHON_LAST_STATE" ]] && return 0
+  typeset -g __ZSH_PYTHON_LAST_STATE="$state"
+
+  if [[ "$VIRTUAL_ENV" != "$venv_path" ]]; then
+    _zsh_python_deactivate_current
+
+    if source "$venv_path/bin/activate" >/dev/null 2>&1; then
+      zsh_startup_log '\e[30;42m PYTHON \e[0m' "\e[32mproject virtualenv active\e[0m"
+    fi
+  fi
+}
+
+zsh_python() {
+  case "$1" in
+    --disable-auto-venv)
+      ZSH_PYTHON_AUTO_VENV=false
+      _zsh_python_deactivate_current
+      typeset -g __ZSH_PYTHON_LAST_STATE="disabled"
+      ;;
+    --enable-auto-venv)
+      ZSH_PYTHON_AUTO_VENV=true
+      typeset -g __ZSH_PYTHON_LAST_STATE=""
+      _zsh_python_status
+      ;;
+    --deactivate)
+      _zsh_python_deactivate_current
+      ;;
+    --status)
+      if [[ "$ZSH_PYTHON_AUTO_VENV" == "true" ]]; then
+        echo "zsh_python: auto venv is enabled"
+      else
+        echo "zsh_python: auto venv is disabled"
+      fi
+      ;;
+    --help|-h|"")
+      cat <<'EOF'
+zsh_python [--enable-auto-venv|--disable-auto-venv|--deactivate|--status]
+
+Examples:
+  zsh_python --disable-auto-venv
+  zsh_python --enable-auto-venv
+  zsh_python --deactivate
+  zsh_python --status
+EOF
+      ;;
+    *)
+      echo "zsh_python: unknown flag '$1'"
+      echo "try: zsh_python --help"
+      return 1
+      ;;
+  esac
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _zsh_python_status
+add-zsh-hook precmd _zsh_python_status
+
+_zsh_python_status

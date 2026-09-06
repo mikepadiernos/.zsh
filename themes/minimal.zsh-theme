@@ -1,0 +1,1 @@
+minimal/minimal.zsh-theme

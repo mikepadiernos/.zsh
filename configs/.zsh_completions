@@ -1,0 +1,260 @@
+# COMPLETIONS
+
+# ============================================================================
+# Completion Configuration
+# ============================================================================
+
+export ZSH_DISABLE_COMPFIX="true"
+
+fpath+=(
+  "${ZSH_PLUGINS}/zsh-completions/src"
+)
+
+if [[ -o interactive ]]; then
+  autoload -Uz compinit
+  export ZSH_COMPDUMP="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-${ZSH_VERSION}"
+  mkdir -p "${ZSH_COMPDUMP:h}" 2>/dev/null
+
+  local -a _compinit_opts
+  _compinit_opts=(-d "$ZSH_COMPDUMP")
+
+  # Root shells often see ownership/mode warnings on shared completion paths.
+  if (( EUID == 0 )); then
+    _compinit_opts+=(-u)
+  fi
+
+  if [[ -s "$ZSH_COMPDUMP" ]]; then
+    _compinit_opts+=(-C)
+  fi
+
+  compinit "${_compinit_opts[@]}"
+  unset _compinit_opts
+fi
+
+# ============================================================================
+# Tool-Specific Completions
+# ============================================================================
+
+_load_zsh_completion() {
+  # Safely eval completion script output from a command when available.
+  local cmd="$1"
+  local output
+  shift
+
+  command -v "$cmd" >/dev/null 2>&1 || return 0
+  output="$(command "$cmd" "$@" 2>/dev/null)" || return 0
+  [[ -n "$output" ]] && eval "$output" >/dev/null 2>&1
+}
+
+_lazy_load_zsh_completion() {
+  local cmd="$1"
+  local completion_fn="$2"
+  local loader_fn="__zsh_lazy_completion_${cmd//[^a-zA-Z0-9_]/_}"
+  local -a generation_command=( "$cmd" )
+  shift 2
+  generation_command+=( "$@" )
+
+  command -v "$cmd" >/dev/null 2>&1 || return 0
+  local quoted_generation_command="${(j: :)${(q)generation_command}}"
+  eval "${loader_fn}() {
+    if (( ! \${+functions[$completion_fn]} )); then
+      _load_zsh_completion ${quoted_generation_command}
+    fi
+    (( \${+functions[$completion_fn]} )) && '$completion_fn' \"\$@\"
+  }"
+  compdef "$loader_fn" "$cmd"
+}
+
+_has_completion_file() {
+  local fn="$1"
+  local dir
+
+  for dir in $fpath; do
+    [[ -r "$dir/$fn" ]] && return 0
+  done
+
+  return 1
+}
+
+_use_system_or_generated_completion() {
+  local cmd="$1"
+  local fn="$2"
+  shift 2
+
+  command -v "$cmd" >/dev/null 2>&1 || return 0
+  _has_completion_file "$fn" && return 0
+
+  (( $# > 0 )) && _load_zsh_completion "$cmd" "$@"
+}
+
+# COMPLETIONS: NVM
+# NVM is loaded lazily in the Node module when a project requires it.
+
+# COMPLETIONS: Docker
+_lazy_load_zsh_completion docker _docker completion zsh
+
+# COMPLETIONS: Docker Compose (standalone)
+_lazy_load_zsh_completion docker-compose _docker-compose completion zsh
+
+# COMPLETIONS: kubectl
+_lazy_load_zsh_completion kubectl _kubectl completion zsh
+
+# COMPLETIONS: Helm
+_lazy_load_zsh_completion helm _helm completion zsh
+
+# COMPLETIONS: GitHub CLI
+# COMPLETIONS: ArgoCD
+_lazy_load_zsh_completion argocd _argocd completion zsh
+
+# COMPLETIONS: Azure CLI
+_lazy_load_zsh_completion az _az completion -s zsh
+
+# COMPLETIONS: Direnv
+_load_zsh_completion direnv hook zsh
+
+# COMPLETIONS: Lazygit
+_load_zsh_completion lazygit completion zsh
+
+# COMPLETIONS: Rclone
+_use_system_or_generated_completion rclone _rclone completion zsh -
+
+# COMPLETIONS: Terraform
+if command -v terraform >/dev/null 2>&1; then
+  if ! _has_completion_file _terraform; then
+    compdef _gnu_generic terraform
+  fi
+fi
+
+# COMPLETIONS: Usage CLI
+# Uses system completion files when available.
+
+# COMPLETIONS: AWS CLI
+if command -v aws_completer >/dev/null 2>&1 && whence -w complete >/dev/null 2>&1; then
+  complete -C aws_completer aws
+elif command -v aws >/dev/null 2>&1 && ! _has_completion_file _aws; then
+  compdef _gnu_generic aws
+fi
+
+# COMPLETIONS: Flatpak and Arch helpers
+# Most package-manager-installed completions are auto-loaded from fpath
+# (e.g. /usr/share/zsh/site-functions) via compinit.
+if command -v flatpak >/dev/null 2>&1 && ! _has_completion_file _flatpak; then
+  compdef _gnu_generic flatpak
+fi
+
+if command -v paru >/dev/null 2>&1 && ! _has_completion_file _paru; then
+  compdef _gnu_generic paru
+fi
+
+if command -v yay >/dev/null 2>&1 && ! _has_completion_file _yay; then
+  compdef _gnu_generic yay
+fi
+
+if command -v pacman >/dev/null 2>&1 && ! _has_completion_file _pacman; then
+  compdef _gnu_generic pacman
+fi
+
+# COMPLETIONS: Custom shell helpers
+_zsh_theme_names() {
+  local theme_dir="${ZSH_THEMES:-}"
+  local -a themes
+
+  [[ -d "$theme_dir" ]] || return 0
+  themes=("$theme_dir"/*.zsh-theme(N:t:r))
+  _values 'theme' $themes
+}
+
+_zsh_themes_completion() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '(-l --list)'{-l,--list}'[list available themes]' \
+    '(-t --theme)'{-t,--theme}'[select theme by name]:theme:_zsh_theme_names' \
+    '*:theme:_zsh_theme_names'
+}
+
+_zsh_setup_completion() {
+  local -a setup_flags
+  setup_flags=(
+    '--setup-all:clone repos and prepare virtualenv'
+    '--setup-venv:prepare virtualenv only'
+    '--pull-repos:clone repos only'
+    '--help:show help'
+    '-h:show help'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe 'command' setup_flags
+    return
+  fi
+
+  case "${words[2]}" in
+    --setup-all)
+      if (( CURRENT == 3 )); then
+        _files
+      elif (( CURRENT == 4 )); then
+        _command_names -e
+      fi
+      ;;
+    --setup-venv)
+      if (( CURRENT == 3 )); then
+        _command_names -e
+      fi
+      ;;
+    --pull-repos)
+      if (( CURRENT == 3 )); then
+        _files
+      fi
+      ;;
+  esac
+}
+
+_zsh_python_completion() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '--enable-auto-venv[enable automatic project virtualenv activation]' \
+    '--disable-auto-venv[disable automatic project virtualenv activation]' \
+    '--deactivate[deactivate currently active virtualenv]' \
+    '--status[show auto-venv status]'
+}
+
+_zsh_plugins_completion() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '--install[clone missing plugin repos listed in git_repos.txt]' \
+    '--update[fetch and fast-forward pull plugin repos]' \
+    '--check-forks[warn for forked repos missing upstream or behind upstream]' \
+    '--no-fetch[skip fetch before checks and updates]' \
+    '--dry-run[print actions without changing repos]' \
+    '--repos-file=[override repo list file]:repo list:_files' \
+    '--plugins-dir=[override plugin directory]:plugin dir:_files -/'
+}
+
+_zsh_tools_completion() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '--list-tools[list managed tools and command availability]' \
+    '--list-links[list custom symlink source/target/status entries]' \
+    '--setup-links[symlink .files dot-config entries to HOME]' \
+    '--update[run tool and system update flow]' \
+    '--mise-only[update only mise-managed tools]' \
+    '--brew-only[update only brew-managed tools]' \
+    '--system-only[skip mise and brew updates]' \
+    '--no-brew[skip brew updates]' \
+    '--no-mise[skip mise updates]' \
+    '--no-paru[skip paru/yay/pacman/apt update stage]' \
+    '--no-grub[skip grub refresh check]' \
+    '--no-flatpak[skip flatpak updates]' \
+    '--no-plasma[skip plasmoid updates]' \
+    '--plasma-strict-rate-limit[treat plasmoid HTTP 429 as failure]' \
+    '--no-firmware[skip fwupdmgr updates]' \
+    '--no-vscode[skip VS Code extension updates]' \
+    '--dry-run[print actions without making changes]'
+}
+
+compdef _zsh_themes_completion zsh_themes
+compdef _zsh_setup_completion zsh_setup zsh-setup
+compdef _zsh_python_completion zsh_python
+compdef _zsh_plugins_completion zsh_plugins zsh-plugins
+compdef _zsh_tools_completion tools
+
+# END COMPLETIONS

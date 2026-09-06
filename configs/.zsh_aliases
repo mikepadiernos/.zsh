@@ -1,0 +1,124 @@
+# zsh-eza
+alias li='la --icons=always'
+
+# lazydocker
+alias lzd='lazydocker'
+
+# sudo: use the pass entry "local/sudo/<user>" (and legacy dotfile form)
+# as the askpass source for normal sudo invocations, while explicitly bypassing
+# the wrapper when stdin validation or any other sudo flags are already provided.
+sudo() {
+	local askpass_entry=""
+	local askpass_file=""
+	local askpass_script=""
+	local secret=""
+	local runtime_user="${ZSH_RUNTIME_USER:-${USER:-$(id -un 2>/dev/null || whoami 2>/dev/null || print -r -- unknown)}}"
+	local pass_entry_primary="${ZSH_SUDO_PASS_ENTRY:-local/sudo/${runtime_user}}"
+	local arg
+
+	for arg in "$@"; do
+		if [[ "$arg" == "-S" || "$arg" == "--stdin" || "$arg" == "-A" || "$arg" == "--askpass" ]]; then
+			command sudo "$@"
+			return $?
+		fi
+	done
+
+	if command -v pass >/dev/null 2>&1; then
+		for askpass_entry in \
+			"$pass_entry_primary" \
+			"pass.local.sudo.${runtime_user}" \
+			"pass/local/sudo/${runtime_user}"; do
+			if pass show "$askpass_entry" >/dev/null 2>&1; then
+				break
+			fi
+			askpass_entry=""
+		done
+	fi
+
+	if [[ -n "$askpass_entry" ]]; then
+		secret="$(pass show "$askpass_entry" 2>/dev/null | head -n1)"
+		if [[ -n "$secret" ]]; then
+			askpass_file="$(mktemp)"
+			printf '%s\n' "$secret" >"$askpass_file"
+			chmod 600 "$askpass_file"
+
+			askpass_script="$(mktemp)"
+			cat >"$askpass_script" <<EOF
+#!/usr/bin/env sh
+cat '$askpass_file'
+EOF
+			chmod 700 "$askpass_script"
+
+			SUDO_ASKPASS="$askpass_script" command sudo -A "$@"
+			local exit_code=$?
+			rm -f "$askpass_script" "$askpass_file"
+			return "$exit_code"
+		fi
+	fi
+
+	command sudo "$@"
+}
+
+# lazygit — clear VS Code askpass env vars so lazygit uses the pass-backed
+# Git credential helper instead of browser-based auth in editor sessions.
+lazygit() {
+	local lazygit_bin="${commands[lazygit]}"
+	if [[ -z "$lazygit_bin" ]]; then
+		print -u2 "lazygit binary not found in PATH"
+		return 127
+	fi
+
+	unset GIT_ASKPASS
+	unset SSH_ASKPASS
+	unset VSCODE_GIT_ASKPASS_NODE
+	unset VSCODE_GIT_ASKPASS_MAIN
+	unset VSCODE_GIT_ASKPASS_EXTRA_ARGS
+	unset VSCODE_GIT_IPC_HANDLE
+	export GIT_TERMINAL_PROMPT=1
+
+	# lazygit reads ~/.gitconfig once at startup, so refresh the gitenv
+	# profile links and repo identity before launching.
+	whence -w git-env-sync >/dev/null 2>&1 && git-env-sync
+
+	"$lazygit_bin" "$@"
+}
+alias lzg='lazygit'
+
+# neomutt
+alias nmt='neomutt'
+
+# neovim
+# alias nvim='$NEOVIM/nvim'
+alias vim='nvim'
+alias vm='nvim'
+
+# yazi — use Chafa (half-block) renderer inside VS Code since the IIP adapter
+# reports zero pixel dimensions; unset the two env vars that trigger VS Code detection
+function yazi() {
+		local yazi_bin="${commands[yazi]}"
+		if [[ -z "$yazi_bin" ]]; then
+				print -u2 "yazi binary not found in PATH"
+				return 127
+		fi
+
+		if [[ "$TERM_PROGRAM" == "vscode" ]]; then
+				env -u VSCODE_INJECTION -u TERM_PROGRAM "$yazi_bin" "$@"
+		else
+				"$yazi_bin" "$@"
+		fi
+}
+alias yz='yazi'
+
+# terminal line wrapping toggles
+nowrap() {
+	printf '\e[?7l'
+}
+
+wrapon() {
+	printf '\e[?7h'
+}
+
+if [[ -d "$HOME/.apps/filecentipede" ]]; then
+	alias -- fileu='env -u LD_PRELOAD QT_QPA_PLATFORM=xcb "$HOME/.apps/filecentipede/fileu"'
+	alias -- filec='env -u LD_PRELOAD QT_QPA_PLATFORM=xcb "$HOME/.apps/filecentipede/lib/filec"'
+fi

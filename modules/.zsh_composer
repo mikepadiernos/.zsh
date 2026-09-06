@@ -1,0 +1,12 @@
+# COMPOSER
+
+# Prefer project context notice when a composer.json is present in the current directory.
+if [[ -f "composer.json" ]]; then
+	zsh_startup_log "\e[30;42m COMPOSER \e[0m" "\e[32mcomposer.json present\e[0m"
+elif command -v composer >/dev/null 2>&1; then
+	zsh_startup_log "\e[30;42m COMPOSER \e[0m" "\e[32minstalled\e[0m"
+else
+	:
+fi
+
+# END COMPOSER

@@ -1,0 +1,12 @@
+# OPENAUDIBLE
+
+# Configure OpenAudible path only when the app is available.
+if command -v openaudible >/dev/null 2>&1 || command -v OpenAudible >/dev/null 2>&1; then
+	export OPENAUDIBLE_HOME="${OPENAUDIBLE_HOME:-$HOME/.apps/openaudible}"
+fi
+
+if [[ -n "$OPENAUDIBLE_HOME" && -d "$OPENAUDIBLE_HOME" ]]; then
+	fpath+=("$OPENAUDIBLE_HOME")
+fi
+
+# END OPENAUDIBLE

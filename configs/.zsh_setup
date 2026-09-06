@@ -1,0 +1,161 @@
+# SETUP
+
+_zsh_setup_venv() {
+	local python_cmd
+	local venv_path
+
+	python_cmd="${1:-python3}"
+	venv_path="$PWD/.venv"
+
+	if ! command -v "$python_cmd" >/dev/null 2>&1; then
+		echo "zsh_setup: python executable not found: $python_cmd"
+		return 1
+	fi
+
+	if [[ ! -f "$venv_path/bin/activate" ]]; then
+		"$python_cmd" -m venv "$venv_path" || return 1
+	fi
+
+	"$venv_path/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || return 1
+
+	# Repo-local Python support currently needs PyNaCl for qute-keepassxc.
+	"$venv_path/bin/python" -m pip install PyNaCl >/dev/null 2>&1 || return 1
+
+	echo "zsh_setup: virtualenv ready at $venv_path"
+}
+
+_zsh_setup_pull_repos() {
+	local repos_file
+	local target_dir
+
+	repos_file="${1:-$PWD/git_repos.txt}"
+
+	if [[ ! -f "$repos_file" ]]; then
+		echo "zsh_setup: git repo list not found: $repos_file"
+		return 1
+	fi
+
+	target_dir="${repos_file:h}"
+
+	(
+		cd "$target_dir" || return 1
+		grep . "${repos_file:t}" | while read -r line; do
+			git clone "$line"
+		done
+	)
+}
+
+_zsh_setup_bootstrap_mise() {
+	if command -v mise >/dev/null 2>&1; then
+		return 0
+	fi
+
+	echo "zsh_setup: mise not found, attempting bootstrap"
+
+	if command -v curl >/dev/null 2>&1; then
+		if curl https://mise.run | sh; then
+			export PATH="$HOME/.local/bin:$PATH"
+			if command -v mise >/dev/null 2>&1; then
+				echo "zsh_setup: mise bootstrap complete"
+				return 0
+			fi
+		fi
+	fi
+
+	echo "zsh_setup: unable to auto-install mise"
+	echo "zsh_setup: install mise manually, then rerun zsh_setup --setup-all"
+	return 1
+}
+
+_zsh_setup_install_tooling() {
+	if ! command -v tools >/dev/null 2>&1; then
+		echo "zsh_setup: tools command not available in this shell"
+		echo "zsh_setup: source ~/.zshrc and rerun"
+		return 1
+	fi
+
+	if ! _zsh_setup_bootstrap_mise; then
+		return 1
+	fi
+
+	echo "zsh_setup: installing tooling via mise"
+	tools --update --mise-only || return 1
+
+	if command -v zsh_plugins >/dev/null 2>&1; then
+		echo "zsh_setup: installing zsh plugin repos"
+		zsh_plugins --install || return 1
+	fi
+
+	return 0
+}
+
+_zsh_setup_all() {
+	local repos_file
+	local python_cmd
+
+	repos_file="${1:-$PWD/git_repos.txt}"
+	python_cmd="${2:-python3}"
+
+	_zsh_setup_pull_repos "$repos_file" || return 1
+	_zsh_setup_venv "$python_cmd" || return 1
+	_zsh_setup_install_tooling || return 1
+
+	echo "zsh_setup: applying symlink setup"
+	tools --setup-links || return 1
+
+	echo "zsh_setup: setup-all complete"
+}
+
+_zsh_setup_print_help() {
+	cat <<'EOF'
+zsh_setup --setup-all [path/to/git_repos.txt] [python-executable]
+zsh_setup --setup-venv [python-executable]
+zsh_setup --pull-repos [path/to/git_repos.txt]
+
+setup-all does the following:
+	1) clone repos from list
+	2) create/update local .venv
+	3) bootstrap mise (if missing) and install tooling via tools --update --mise-only
+	4) install zsh plugins via zsh_plugins --install (when available)
+	5) apply symlinks via tools --setup-links
+
+Examples:
+	zsh_setup --setup-all
+	zsh_setup --setup-all /path/to/git_repos.txt python3
+	zsh_setup --setup-venv
+	zsh_setup --setup-venv python3
+	zsh_setup --pull-repos
+	zsh_setup --pull-repos /path/to/git_repos.txt
+EOF
+}
+
+zsh_setup() {
+	local flag
+
+	flag="$1"
+	shift || true
+
+	case "$flag" in
+		--setup-all)
+			_zsh_setup_all "$@"
+			;;
+		--setup-venv)
+			_zsh_setup_venv "$@"
+			;;
+		--pull-repos)
+			_zsh_setup_pull_repos "$@"
+			;;
+		--help|-h|'')
+			_zsh_setup_print_help
+			;;
+		*)
+			echo "zsh_setup: unknown flag '$flag'"
+			echo "try: zsh_setup --help"
+			return 1
+			;;
+	esac
+}
+
+alias zsh-setup='zsh_setup'
+
+# END SETUP

@@ -1,0 +1,128 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+typeset -gi ZSH_NODE_STATUS_DEBOUNCE_SECONDS="${ZSH_NODE_STATUS_DEBOUNCE_SECONDS:-2}"
+typeset -g __ZSH_NODE_LAST_PWD=""
+typeset -gi __ZSH_NODE_LAST_CHECK_EPOCH=0
+
+_zsh_node_find_project_root() {
+  local dir="$PWD"
+
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" || -f "$dir/.nvmrc" || -f "$dir/.node-version" ]]; then
+      print -r -- "$dir"
+      return 0
+    fi
+    dir="${dir:h}"
+  done
+
+  return 1
+}
+
+_zsh_node_is_used() {
+  local root="$1"
+
+  [[ -f "$root/package.json" ]] && return 0
+  [[ -f "$root/package-lock.json" ]] && return 0
+  [[ -f "$root/pnpm-lock.yaml" ]] && return 0
+  [[ -f "$root/yarn.lock" ]] && return 0
+
+  return 1
+}
+
+_zsh_node_has_mise_node_config() {
+  local dir="$1"
+
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/.mise.toml" ]] && grep -Eq '(^|[[:space:]])node(js)?[[:space:]]*=' "$dir/.mise.toml"; then
+      return 0
+    fi
+
+    if [[ -f "$dir/.tool-versions" ]] && grep -Eq '^(nodejs|node)[[:space:]]+' "$dir/.tool-versions"; then
+      return 0
+    fi
+
+    dir="${dir:h}"
+  done
+
+  return 1
+}
+
+_zsh_node_load_nvm() {
+  [[ -n "$__ZSH_NODE_NVM_LOADED" ]] && return 0
+  [[ -s "$NVM_DIR/nvm.sh" ]] || return 1
+
+  # Load nvm lazily only when a Node project needs it.
+  . "$NVM_DIR/nvm.sh"
+  [[ -s "$NVM_DIR/bash_completion" ]] && . "$NVM_DIR/bash_completion"
+  typeset -g __ZSH_NODE_NVM_LOADED=1
+  return 0
+}
+
+_zsh_node_should_refresh() {
+  local now="${EPOCHSECONDS:-0}"
+
+  if [[ "$PWD" != "$__ZSH_NODE_LAST_PWD" ]]; then
+    __ZSH_NODE_LAST_PWD="$PWD"
+    __ZSH_NODE_LAST_CHECK_EPOCH="$now"
+    return 0
+  fi
+
+  if (( now - __ZSH_NODE_LAST_CHECK_EPOCH >= ZSH_NODE_STATUS_DEBOUNCE_SECONDS )); then
+    __ZSH_NODE_LAST_CHECK_EPOCH="$now"
+    return 0
+  fi
+
+  return 1
+}
+
+_zsh_node_status() {
+  local project_root
+  local needs_nvm=0
+  local mise_for_node=0
+  local state
+
+  _zsh_node_should_refresh || return 0
+
+  project_root="$(_zsh_node_find_project_root)" || {
+    typeset -g __ZSH_NODE_LAST_STATE=""
+    return 0
+  }
+
+  # Don't show anything unless this directory actually uses Node.
+  _zsh_node_is_used "$project_root" || {
+    typeset -g __ZSH_NODE_LAST_STATE=""
+    return 0
+  }
+
+  if [[ -f "$project_root/.nvmrc" || -f "$project_root/.node-version" ]]; then
+    needs_nvm=1
+  fi
+
+  if (( needs_nvm )) && command -v mise >/dev/null 2>&1 && _zsh_node_has_mise_node_config "$project_root"; then
+    mise_for_node=1
+  fi
+
+  state="$project_root:$needs_nvm:$mise_for_node"
+  [[ "$state" == "$__ZSH_NODE_LAST_STATE" ]] && return 0
+  typeset -g __ZSH_NODE_LAST_STATE="$state"
+
+  (( needs_nvm )) || return 0
+
+  if _zsh_node_load_nvm; then
+    zsh_startup_log '\e[30;42m NODE \e[0m' "\e[32mproject uses nvm\e[0m"
+  else
+    zsh_startup_log '\e[31;41m NVM \e[0m' 'is' "\e[31mrequired but not loaded\e[0m"
+  fi
+
+  if (( mise_for_node )); then
+    zsh_startup_log '\e[30;43m MISE \e[0m' "\e[33mnode config detected; npm can be provided by mise\e[0m"
+  fi
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _zsh_node_status
+add-zsh-hook precmd _zsh_node_status
+
+_zsh_node_status
+

@@ -1,0 +1,204 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+typeset -g ZSH_NOCSD_LIBRARY=""
+typeset -g ZSH_NOCSD_SAVED_LD_PRELOAD=""
+typeset -g ZSH_NOCSD_APPLIED="0"
+typeset -g ZSH_NOCSD_BLACKLIST_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/gtk-nocsd-blacklist"
+typeset -gA ZSH_NOCSD_COMMAND_CACHE
+typeset -ga ZSH_NOCSD_DESKTOP_DIRS
+
+ZSH_NOCSD_DESKTOP_DIRS=()
+[[ -d /usr/share/applications ]] && ZSH_NOCSD_DESKTOP_DIRS+=(/usr/share/applications)
+[[ -d /usr/local/share/applications ]] && ZSH_NOCSD_DESKTOP_DIRS+=(/usr/local/share/applications)
+[[ -d "$HOME/.local/share/applications" ]] && ZSH_NOCSD_DESKTOP_DIRS+=("$HOME/.local/share/applications")
+
+_zsh_nocsd_apply_blacklist_aliases() {
+	local app
+
+	if command -v gtk-nocsd-sync-shims >/dev/null 2>&1; then
+		gtk-nocsd-sync-shims >/dev/null 2>&1
+	fi
+
+	[[ -r "$ZSH_NOCSD_BLACKLIST_FILE" ]] || return 0
+
+	while IFS= read -r app; do
+		[[ -z "$app" || "$app" == '#'* ]] && continue
+
+		if [[ -d "$HOME/.apps/filecentipede" && ( "$app" == fileu || "$app" == filec ) ]]; then
+			continue
+		fi
+
+		# Plain command names get both "cmd" and "./cmd" aliases.
+		if [[ "$app" == */* ]]; then
+			alias -- "$app"="env -u LD_PRELOAD $app"
+		else
+			alias -- "$app"="env -u LD_PRELOAD $app"
+			alias -- "./$app"="env -u LD_PRELOAD ./$app"
+		fi
+	done < "$ZSH_NOCSD_BLACKLIST_FILE"
+}
+
+_zsh_nocsd_is_installed() {
+	if command -v gtk-nocsd >/dev/null 2>&1; then
+		return 0
+	fi
+
+	[[ -r /usr/lib/libgtk-nocsd.so || -r /opt/gtk-nocsd/libgtk-nocsd.so ]]
+}
+
+_zsh_nocsd_find_library() {
+	local candidate
+
+	for candidate in \
+		/usr/lib/libgtk-nocsd.so \
+		/opt/gtk-nocsd/libgtk-nocsd.so
+	do
+		[[ -r "$candidate" ]] && {
+			print -r -- "$candidate"
+			return 0
+		}
+	done
+
+	return 1
+}
+
+_zsh_nocsd_prepend_library() {
+	local current_ld_preload="${LD_PRELOAD:-}"
+
+	case ":${current_ld_preload}:" in
+		*":${ZSH_NOCSD_LIBRARY}:"*)
+			return 0
+			;;
+	esac
+
+	if [[ -n "$current_ld_preload" ]]; then
+		export LD_PRELOAD="${ZSH_NOCSD_LIBRARY}:${current_ld_preload}"
+	else
+		export LD_PRELOAD="$ZSH_NOCSD_LIBRARY"
+	fi
+}
+
+_zsh_nocsd_restore_library() {
+	if [[ -n "$ZSH_NOCSD_SAVED_LD_PRELOAD" ]]; then
+		export LD_PRELOAD="$ZSH_NOCSD_SAVED_LD_PRELOAD"
+	else
+		unset LD_PRELOAD
+	fi
+}
+
+_zsh_nocsd_command_needs_library() {
+	local command_line="$1"
+	local -a command_words
+	local candidate_command resolved_command word cache_key
+
+	command_words=(${(z)command_line})
+	(( $#command_words )) || return 1
+
+	for word in "${command_words[@]}"; do
+		case "$word" in
+			env|command|nice|ionice|setsid|nohup|sudo)
+				continue
+				;;
+			*=*)
+				continue
+				;;
+			-*)
+				if [[ -z "$candidate_command" ]]; then
+					continue
+				fi
+				;;
+			*)
+				candidate_command="$word"
+				break
+				;;
+		esac
+	done
+
+	[[ -n "$candidate_command" ]] || return 1
+
+	cache_key="$candidate_command"
+	if [[ -n "${ZSH_NOCSD_COMMAND_CACHE[$cache_key]+x}" ]]; then
+		[[ "${ZSH_NOCSD_COMMAND_CACHE[$cache_key]}" == 1 ]]
+		return $?
+	fi
+
+	if (( ${+builtins[$candidate_command]} || ${+functions[$candidate_command]} )); then
+		ZSH_NOCSD_COMMAND_CACHE[$cache_key]=0
+		return 1
+	fi
+
+	case "$candidate_command" in
+		flatpak|flatpak-spawn|snap|bubblewrap)
+			ZSH_NOCSD_COMMAND_CACHE[$cache_key]=0
+			return 1
+			;;
+		gtk-launch|gio|xdg-open|kioclient|nautilus|nemo|thunar|dolphin|caja|pcmanfm|gvfs-open|open)
+			ZSH_NOCSD_COMMAND_CACHE[$cache_key]=1
+			return 0
+			;;
+	esac
+
+	if (( $#ZSH_NOCSD_DESKTOP_DIRS )); then
+		if command -v rg >/dev/null 2>&1; then
+			if rg -l --glob '*.desktop' "^Exec=.*\\b${candidate_command}\\b" "${ZSH_NOCSD_DESKTOP_DIRS[@]}" >/dev/null 2>&1; then
+				ZSH_NOCSD_COMMAND_CACHE[$cache_key]=1
+				return 0
+			fi
+		elif grep -Rsl --include='*.desktop' -E "^Exec=.*([[:space:][:punct:]]|^)${candidate_command}([[:space:][:punct:]]|$)" "${ZSH_NOCSD_DESKTOP_DIRS[@]}" >/dev/null 2>&1; then
+			ZSH_NOCSD_COMMAND_CACHE[$cache_key]=1
+			return 0
+		fi
+	fi
+
+	resolved_command="$(whence -p -- "$candidate_command" 2>/dev/null)" || {
+		ZSH_NOCSD_COMMAND_CACHE[$cache_key]=0
+		return 1
+	}
+	[[ -x "$resolved_command" && -f "$resolved_command" ]] || {
+		ZSH_NOCSD_COMMAND_CACHE[$cache_key]=0
+		return 1
+	}
+
+	if command ldd "$resolved_command" 2>/dev/null | grep -Eq 'libgtk-3|libgtk-4|libadwaita-1|libhandy-1'; then
+		ZSH_NOCSD_COMMAND_CACHE[$cache_key]=1
+		return 0
+	fi
+
+	ZSH_NOCSD_COMMAND_CACHE[$cache_key]=0
+	return 1
+}
+
+_zsh_nocsd_preexec() {
+	[[ -n "$ZSH_NOCSD_LIBRARY" ]] || return 0
+
+	if _zsh_nocsd_command_needs_library "$1"; then
+		ZSH_NOCSD_SAVED_LD_PRELOAD="${LD_PRELOAD:-}"
+		_zsh_nocsd_prepend_library
+		ZSH_NOCSD_APPLIED=1
+	else
+		ZSH_NOCSD_APPLIED=0
+	fi
+}
+
+_zsh_nocsd_precmd() {
+	[[ "$ZSH_NOCSD_APPLIED" == 1 ]] || return 0
+
+	_zsh_nocsd_restore_library
+	ZSH_NOCSD_SAVED_LD_PRELOAD=""
+	ZSH_NOCSD_APPLIED=0
+}
+
+if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+	if _zsh_nocsd_is_installed; then
+		ZSH_NOCSD_LIBRARY="$(_zsh_nocsd_find_library 2>/dev/null)" || ZSH_NOCSD_LIBRARY=""
+	else
+		ZSH_NOCSD_LIBRARY=""
+	fi
+
+	if [[ -n "$ZSH_NOCSD_LIBRARY" ]]; then
+		precmd_functions=(_zsh_nocsd_precmd ${precmd_functions:#_zsh_nocsd_precmd})
+		preexec_functions=(_zsh_nocsd_preexec ${preexec_functions:#_zsh_nocsd_preexec})
+	fi
+fi
+
+_zsh_nocsd_apply_blacklist_aliases

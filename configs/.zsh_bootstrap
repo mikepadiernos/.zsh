@@ -1,0 +1,160 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+typeset -g __ZSH_STARTUP_PROFILE_ENABLED=false
+typeset -ga __ZSH_STARTUP_PROFILE_LINES=( )
+typeset -gi __ZSH_STARTUP_PROFILE_TOP=10
+
+source_if_exists() {
+	local source_path="$1"
+	local start_ms=0
+	local end_ms=0
+	local elapsed_ms=0
+	local source_status=0
+
+	[[ -f "$source_path" ]] || return 0
+
+	if [[ "$__ZSH_STARTUP_PROFILE_ENABLED" == true ]]; then
+		start_ms="$(zsh_startup_profile_now_ms)"
+		source "$source_path"
+		source_status=$?
+		end_ms="$(zsh_startup_profile_now_ms)"
+		elapsed_ms=$(( end_ms - start_ms ))
+		zsh_startup_profile_record "source:${source_path:t}" "$elapsed_ms"
+		return "$source_status"
+	fi
+
+	source "$source_path"
+}
+
+zsh_startup_is_truthy() {
+	case "${1:l}" in
+		1|true|yes|on)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+zsh_startup_should_log() {
+	[[ -o interactive ]] || return 1
+	zsh_startup_is_truthy "${ZSH_STARTUP_QUIET:-true}" && return 1
+	return 0
+}
+
+zsh_startup_log() {
+	zsh_startup_should_log || return 0
+	echo -e "$@"
+}
+
+zsh_startup_profile_now_ms() {
+	if (( ${+EPOCHREALTIME} )); then
+		local -F 6 now_seconds
+		local now_ms=""
+		now_seconds="$EPOCHREALTIME"
+		now_ms="$(( now_seconds * 1000.0 ))"
+		print -r -- "${now_ms%.*}"
+		return 0
+	fi
+
+	print -r -- "$(( SECONDS * 1000 ))"
+}
+
+zsh_startup_profile_record() {
+	[[ "$__ZSH_STARTUP_PROFILE_ENABLED" == true ]] || return 0
+	__ZSH_STARTUP_PROFILE_LINES+=("$2|$1")
+}
+
+zsh_startup_profile_report() {
+	[[ "$__ZSH_STARTUP_PROFILE_ENABLED" == true ]] || return 0
+
+	local total_ms=0
+	local line=""
+	local entry_ms=0
+	local entry_label=""
+
+	for line in "${__ZSH_STARTUP_PROFILE_LINES[@]}"; do
+		entry_ms="${line%%|*}"
+		(( total_ms += entry_ms ))
+	done
+
+	echo "zsh startup profile: total=${total_ms}ms top=${__ZSH_STARTUP_PROFILE_TOP}"
+	print -rl -- "${__ZSH_STARTUP_PROFILE_LINES[@]}" |
+		sort -t'|' -nrk1,1 |
+		head -n "$__ZSH_STARTUP_PROFILE_TOP" |
+		while IFS='|' read -r entry_ms entry_label; do
+			printf '  %6sms  %s\n' "$entry_ms" "$entry_label"
+		done
+}
+
+if [[ -o interactive ]] && zsh_startup_is_truthy "${ZSH_STARTUP_PROFILE:-false}"; then
+	__ZSH_STARTUP_PROFILE_ENABLED=true
+	zmodload zsh/datetime 2>/dev/null || true
+	if [[ "${ZSH_STARTUP_PROFILE_TOP:-}" == <-> ]]; then
+		__ZSH_STARTUP_PROFILE_TOP="$ZSH_STARTUP_PROFILE_TOP"
+	fi
+fi
+
+# Shared runtime user identity for cross-host/user portability.
+typeset -g ZSH_RUNTIME_USER="${ZSH_RUNTIME_USER:-${USER:-$(id -un 2>/dev/null || whoami 2>/dev/null || print -r -- unknown)}}"
+
+eval_if_command_exists() {
+	local command_name="$1"
+	shift
+	command -v "$command_name" >/dev/null 2>&1 && eval "$*"
+}
+
+source_cached_init() {
+	local command_name="$1"
+	local cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/init-${command_name}"
+	local command_path="$(whence -p "$command_name")"
+	local temporary_file="${cache_file}.tmp.$$"
+	local start_ms=0
+	local end_ms=0
+	local elapsed_ms=0
+	local source_status=0
+	shift
+
+	[[ -n "$command_path" ]] || return 0
+	if [[ ! -s "$cache_file" || "$command_path" -nt "$cache_file" ]]; then
+		mkdir -p "${cache_file:h}" 2>/dev/null || return 0
+		"$command_path" "$@" >| "$temporary_file" 2>/dev/null || {
+			rm -f "$temporary_file"
+			return 0
+		}
+		[[ -s "$temporary_file" ]] || {
+			rm -f "$temporary_file"
+			return 0
+		}
+		mv -f "$temporary_file" "$cache_file"
+		zcompile "$cache_file" 2>/dev/null
+	fi
+
+	if [[ "$__ZSH_STARTUP_PROFILE_ENABLED" == true ]]; then
+		start_ms="$(zsh_startup_profile_now_ms)"
+		source "$cache_file"
+		source_status=$?
+		end_ms="$(zsh_startup_profile_now_ms)"
+		elapsed_ms=$(( end_ms - start_ms ))
+		zsh_startup_profile_record "init:${command_name}" "$elapsed_ms"
+		return "$source_status"
+	fi
+
+	source "$cache_file"
+}
+
+zsh_bootstrap_files=(
+	"${ZSH_CONFIGS}/.zsh_load_configs"
+	"${ZSH_CONFIGS}/.zsh_load_modules"
+)
+
+for zsh_bootstrap_file in "${zsh_bootstrap_files[@]}"; do
+	source_if_exists "$zsh_bootstrap_file"
+done
+
+source_cached_init fzf --zsh
+source_cached_init atuin init zsh
+source_cached_init zoxide init --cmd cd zsh
+
+zsh_startup_profile_report

@@ -1,0 +1,19 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+zsh_config_files=(
+
+	"${ZSH_CONFIGS}/.zsh_themes"
+	"${ZSH_CONFIGS}/.zsh_plugins"
+	"${ZSH_CONFIGS}/.zsh_bindkeys"
+	"${ZSH_CONFIGS}/.zsh_aliases"
+	"${ZSH_CONFIGS}/.zsh_history"
+	"${ZSH_MODULES}/.zsh_go"
+	"${ZSH_CONFIGS}/.zsh_completions"
+	"${ZSH_CONFIGS}/.zsh_prompt"
+	"${ZSH_CONFIGS}/.zsh_setup"
+	"${ZSH_CONFIGS}/.zsh_tools"
+)
+
+for zsh_config_file in "${zsh_config_files[@]}"; do
+	source_if_exists "$zsh_config_file"
+done

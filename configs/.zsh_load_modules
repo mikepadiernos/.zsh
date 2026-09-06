@@ -1,0 +1,22 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+zsh_module_files=(
+	"${ZSH_MODULES}/.zsh_wsl"
+	"${ZSH_MODULES}/.zsh_homebrew"
+	"${ZSH_MODULES}/.zsh_gpg"
+	"${ZSH_MODULES}/.zsh_drush"
+	"${ZSH_MODULES}/.zsh_composer"
+	"${ZSH_MODULES}/.zsh_python"
+	"${ZSH_MODULES}/.zsh_git"
+	"${ZSH_MODULES}/.zsh_gh"
+	"${ZSH_MODULES}/.zsh_node"
+	"${ZSH_MODULES}/.zsh_docker"
+	"${ZSH_MODULES}/.zsh_nocsd"
+	"${ZSH_MODULES}/.zsh_nvidia"
+	# mise must activate last so its PATH entries take precedence over brew/system tools
+	"${ZSH_MODULES}/.zsh_mise"
+)
+	
+for zsh_module_file in "${zsh_module_files[@]}"; do
+	source_if_exists "$zsh_module_file"
+done

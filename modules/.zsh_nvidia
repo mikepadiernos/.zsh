@@ -1,0 +1,35 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+# Enable NVIDIA PRIME render offload for desktop sessions when the driver is present.
+# This makes OpenGL and Vulkan apps use the discrete GPU instead of the Intel iGPU.
+
+if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+	if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+		export __NV_PRIME_RENDER_OFFLOAD=1
+		export __GLX_VENDOR_LIBRARY_NAME=nvidia
+		export __VK_LAYER_NV_optimus=NVIDIA_only
+	fi
+fi
+
+# Convenience wrapper for launching one app through the NVIDIA GPU.
+nvidia-offload() {
+	__NV_PRIME_RENDER_OFFLOAD=1 \
+	__GLX_VENDOR_LIBRARY_NAME=nvidia \
+	__VK_LAYER_NV_optimus=NVIDIA_only \
+	"$@"
+}
+
+# Steam-specific helper that launches games through the NVIDIA GPU.
+steam-nvidia() {
+	__NV_PRIME_RENDER_OFFLOAD=1 \
+	__GLX_VENDOR_LIBRARY_NAME=nvidia \
+	__VK_LAYER_NV_optimus=NVIDIA_only \
+	steam "$@"
+}
+
+# Make Steam use NVIDIA offload when it starts from this shell.
+if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+	if command -v steam >/dev/null 2>&1; then
+		alias steam='__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only steam'
+	fi
+fi

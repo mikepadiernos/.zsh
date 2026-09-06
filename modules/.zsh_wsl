@@ -1,0 +1,49 @@
+#!/bin/zsh
+# WSL (Windows Subsystem for Linux) integration
+
+# Check if running in WSL
+_zsh_is_wsl() {
+    local osrelease=""
+
+    [[ -r /proc/sys/kernel/osrelease ]] || return 1
+    osrelease="$(</proc/sys/kernel/osrelease)"
+    [[ "${osrelease:l}" == *microsoft* || "${osrelease:l}" == *wsl* ]]
+}
+
+# Only apply WSL integrations if actually running in WSL
+if _zsh_is_wsl; then
+    typeset -g __ZSH_WSL_PASTE_BACKEND=""
+
+    # Clipboard integration: prefer pbcopy/pbpaste if available, otherwise
+    # fall back to native Windows clipboard commands exposed by WSL.
+    if command -v pbcopy >/dev/null 2>&1 && command -v pbpaste >/dev/null 2>&1; then
+        alias copy='pbcopy'
+        alias paste='pbpaste'
+        __ZSH_WSL_PASTE_BACKEND="pbpaste"
+    else
+        if command -v clip.exe >/dev/null 2>&1; then
+            copy() {
+                clip.exe
+            }
+        fi
+
+        if command -v powershell.exe >/dev/null 2>&1; then
+            paste() {
+                powershell.exe -NoProfile -Command Get-Clipboard 2>/dev/null | tr -d '\r'
+            }
+            __ZSH_WSL_PASTE_BACKEND="powershell"
+        fi
+    fi
+
+    # Paste Windows clipboard into zsh command line with Ctrl+V
+    if [[ -o interactive ]] && [[ -n "$__ZSH_WSL_PASTE_BACKEND" ]]; then
+        wsl_clipboard_paste_widget() (
+            local clip
+            clip="$(paste 2>/dev/null || true)"
+            LBUFFER+="$clip"
+            zle redisplay
+        )
+        zle -N wsl_clipboard_paste_widget
+        bindkey '^V' wsl_clipboard_paste_widget
+    fi
+fi

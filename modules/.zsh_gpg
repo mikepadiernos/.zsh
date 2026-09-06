@@ -1,0 +1,27 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+export GPG_TTY="${TTY:-$(tty)}"
+
+_gpg_preset_from_pass_once() {
+  local script_path runtime_dir stamp_file agent_socket
+
+  script_path="$HOME/.gnupg/scripts/gpg-preset-from-pass.sh"
+  [[ -r "$script_path" ]] || return 0
+  command -v gpgconf >/dev/null 2>&1 || return 0
+
+  runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
+  stamp_file="$runtime_dir/gpg-preset-from-pass.$UID.stamp"
+  agent_socket="$(gpgconf --list-dirs agent-socket 2>/dev/null)"
+
+  # Run once per session, and run again if the agent socket is newer.
+  if [[ -n "$agent_socket" && -S "$agent_socket" && -f "$stamp_file" && "$stamp_file" -nt "$agent_socket" ]]; then
+    return 0
+  fi
+
+  if bash "$script_path" >/dev/null 2>&1; then
+    : > "$stamp_file"
+  fi
+}
+
+_gpg_preset_from_pass_once
+unset -f _gpg_preset_from_pass_once
