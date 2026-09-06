@@ -87,7 +87,13 @@ if [ -z "$_php_formula" ] && command -v brew >/dev/null 2>&1; then
       _php_formula="${_php_versions[-1]}"
     fi
   else
-    _php_formula="$(command brew list --formula 2>/dev/null | grep -E '^php@[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+    _php_formula="$(
+      command brew list --formula 2>/dev/null |
+      awk '/^php@[0-9]+\.[0-9]+$/ { split(substr($0,5), v, "."); printf("%05d %05d %s\n", v[1], v[2], $0) }' |
+      sort |
+      tail -n 1 |
+      awk '{print $3}'
+    )"
   fi
 fi
 

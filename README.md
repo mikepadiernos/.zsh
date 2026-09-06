@@ -66,6 +66,7 @@ Provided by `.zsh/configs/.zsh_completions`.
 
 Highlights:
 - Uses compinit with cache dump at `~/.cache/zsh/zcompdump-<zsh_version>`.
+- Forces non-interactive compinit startup arguments (`-i -u`) to avoid interactive security prompts in VPS/non-root environments.
 - Enables lazy completion generation for heavy CLIs (docker, kubectl, helm, argocd, az, etc.).
 - Adds custom completion for:
   - zsh_themes
@@ -169,6 +170,7 @@ Main flags:
 
 Behavior:
 - Orchestrates updates across mise, brew, system packages, grub refresh, flatpak, plasmoids, firmware, and VS Code extensions.
+- Linux package-manager update stages are auto-gated by OS/tool detection; on macOS or unsupported Linux package-manager setups, those stages are skipped.
 - Symlink setup can link dot-config entries from `~/.files` into `~` with safe backup/relink behavior.
 - Listing mode can show available managed tools and the current custom symlink map/status.
 - list-links also reports complex nested symlinks from within each config folder when they resolve outside the folder or use absolute targets.
@@ -194,6 +196,10 @@ Actions:
 Startup default:
 - Missing plugin repos are not auto-cloned during shell init unless `ZSH_PLUGIN_AUTO_INSTALL_REPOS=true` is set.
 - Recommended first-run bootstrap: `zsh_plugins --install`.
+
+Additional startup toggles:
+- `ZSH_PLUGIN_AUTO_INSTALL_REPOS=false` by default.
+- `ZSH_PLUGIN_AUTO_INSTALL_DEPENDENCIES=false` by default.
 
 Options:
 - --no-fetch: skip fetch before checks/updates
@@ -361,6 +367,9 @@ Credential-backed flows:
 - pass
 - gpg and gpg-agent
 
+Note:
+- `pass` is only required for package-manager sudo automation when a supported Linux system-package stage is actually executed.
+
 Ecosystem-specific helpers:
 - ddev (Drush helper functions)
 - qutebrowser, copyq, yazi, lazygit, lazydocker (for config link mappings)
@@ -413,6 +422,7 @@ Behavior:
 - Enforces root safety by adding `--no-brew` automatically in root sessions.
 - `--scheduled` disables privileged/interactive update stages (`--no-paru --no-grub --no-firmware`).
 - `--ensure-user-timer` auto-installs and enables the user systemd timer when user systemd is available.
+- Homebrew PHP formula fallback uses a macOS-safe portable version sort strategy.
 
 VS Code tasks:
 - `tools:update`
@@ -440,6 +450,23 @@ cron template:
 - Use the line in `scripts/cron/zsh-tools-update.cron` in `crontab -e`.
 - Logs default to `~/.cache/zsh-tools-update.log`.
 
+### Copilot Specs and Agents
+
+Workspace policy and scoped instruction specs:
+- `.github/copilot-instructions.md`
+- `.github/instructions/*.instructions.md`
+
+Custom startup-focused agent:
+- `.github/agents/zsh-startup-guardian.agent.md`
+
+Prompt specs for recurring maintenance:
+- `.github/prompts/startup-safety-review.prompt.md`
+- `.github/prompts/dependency-policy-check.prompt.md`
+
+Deterministic guard hook:
+- `.github/hooks/upgrade-policy-guard.json`
+- `scripts/hooks/guard-upgrade-paths.sh`
+
 ### Performance-Safe Defaults
 
 - Keep ZSH_PROMPT_ASYNC_GIT=true.
@@ -452,6 +479,7 @@ cron template:
 - Root shell plugin behavior is intentionally reduced unless explicitly overridden.
 - Several features are context-aware and only activate inside matching project types.
 - Startup cache files are stored under ~/.cache/zsh.
+- Docker helper `d-kill-pattern` uses a portable loop implementation (no GNU-only `xargs -r`).
 
 ## Credits and Inspiration
 

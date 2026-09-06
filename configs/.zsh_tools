@@ -748,7 +748,9 @@ tools() {
 	local run_vscode=1
 	local dry_run=0
 	local is_ubuntu=0
+	local is_macos=0
 	local is_kde_plasma=0
+	local linux_pkg_manager_available=0
 	local current_desktop=""
 	local grub_version_before=""
 	local grub_version_after=""
@@ -902,6 +904,18 @@ EOF
 		fi
 	fi
 
+	if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+		is_macos=1
+	fi
+
+	if (( run_paru )) && (( ! is_macos )); then
+		if (( is_ubuntu )) && command -v apt >/dev/null 2>&1; then
+			linux_pkg_manager_available=1
+		elif command -v paru >/dev/null 2>&1 || command -v yay >/dev/null 2>&1 || command -v pacman >/dev/null 2>&1; then
+			linux_pkg_manager_available=1
+		fi
+	fi
+
 	current_desktop="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}"
 	if [[ "$current_desktop" == *KDE* || "$current_desktop" == *Plasma* || -n "${KDE_FULL_SESSION:-}" ]]; then
 		is_kde_plasma=1
@@ -993,7 +1007,7 @@ EOF
 		fi
 	fi
 
-	if (( run_paru )); then
+	if (( run_paru && linux_pkg_manager_available )); then
 		if (( dry_run )); then
 			echo "[dry-run] pass show $pass_entry (or $pass_entry_alt) | head -n1 | sudo -S -p '' -v"
 			echo "[dry-run] create temporary SUDO_ASKPASS helper for system package updates"
@@ -1059,19 +1073,17 @@ EOF
 	fi
 
 	if (( run_paru )); then
-		if (( is_ubuntu )); then
-			if command -v apt >/dev/null 2>&1; then
-				if (( dry_run )); then
-					echo "[dry-run] sudo apt update && sudo apt upgrade -y"
-				else
-					if [[ -n "$sudo_askpass_script" ]]; then
-						SUDO_ASKPASS="$sudo_askpass_script" command sudo -A apt update && SUDO_ASKPASS="$sudo_askpass_script" command sudo -A apt upgrade -y
-					else
-						command sudo apt update && command sudo apt upgrade -y
-					fi
-				fi
+		if (( ! linux_pkg_manager_available )); then
+			echo "tools: skipping system package update (no supported Linux package manager found)"
+		elif (( is_ubuntu )); then
+			if (( dry_run )); then
+				echo "[dry-run] sudo apt update && sudo apt upgrade -y"
 			else
-				echo "tools: skipping ubuntu update (apt not found)"
+				if [[ -n "$sudo_askpass_script" ]]; then
+					SUDO_ASKPASS="$sudo_askpass_script" command sudo -A apt update && SUDO_ASKPASS="$sudo_askpass_script" command sudo -A apt upgrade -y
+				else
+					command sudo apt update && command sudo apt upgrade -y
+				fi
 			fi
 		elif command -v paru >/dev/null 2>&1; then
 			if (( dry_run )); then
@@ -1096,7 +1108,7 @@ EOF
 				command sudo pacman -Syu
 			fi
 		else
-			echo "tools: skipping arch update (paru, yay, and pacman not found)"
+			echo "tools: skipping system package update (no supported Linux package manager found)"
 		fi
 	fi
 

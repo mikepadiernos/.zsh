@@ -1,12 +1,12 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-script_dir="${0:A:h}"
-repo_root="${script_dir:h:h}"
+typeset -r script_dir="${0:A:h}"
+typeset -r repo_root="${script_dir:h:h}"
 
-service_src="$repo_root/scripts/systemd/zsh-tools-update.service"
-timer_src="$repo_root/scripts/systemd/zsh-tools-update.timer"
-user_systemd_dir="$HOME/.config/systemd/user"
+typeset -r service_src="$repo_root/scripts/systemd/zsh-tools-update.service"
+typeset -r timer_src="$repo_root/scripts/systemd/zsh-tools-update.timer"
+typeset -r user_systemd_dir="$HOME/.config/systemd/user"
 
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "systemd-user: skipping (systemctl not found)"

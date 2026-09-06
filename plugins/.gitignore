@@ -1,1 +1,3 @@
-./zsh-*
+*
+!/.gitignore
+!/git_repos.txt

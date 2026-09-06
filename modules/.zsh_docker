@@ -132,11 +132,16 @@ d-grep() {
 }
 
 d-kill-pattern() {
-	_zsh_docker_cli ps |
-		grep "$@" |
-		grep -v '^CONTAINER' |
-		awk '{print $1}' |
-		xargs -rI % sh -c 'docker kill "$1" >/dev/null && echo "$1 killed"' _ %
+	local container_id
+	while IFS= read -r container_id; do
+		[[ -n "$container_id" ]] || continue
+		_zsh_docker_cli kill "$container_id" >/dev/null && echo "$container_id killed"
+	done < <(
+		_zsh_docker_cli ps |
+			grep "$@" |
+			grep -v '^CONTAINER' |
+			awk '{print $1}'
+	)
 }
 
 d-pid() {

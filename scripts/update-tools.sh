@@ -1,13 +1,13 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-script_dir="${0:A:h}"
-repo_root="${script_dir:h}"
+typeset -r script_dir="${0:A:h}"
+typeset -r repo_root="${script_dir:h}"
 
 cd "$repo_root"
 
-typeset -a passthrough_flags=( )
-typeset -a tool_args=( --update )
+typeset -a passthrough_flags=()
+typeset -a tool_args=(--update)
 typeset -i scheduled_mode=0
 typeset -i ensure_user_timer=0
 
@@ -35,7 +35,7 @@ Behavior:
   - Enforces brew safety: adds --no-brew automatically for root user
   - --scheduled mode disables interactive/privileged update stages:
       --no-paru --no-grub --no-firmware
-    - --ensure-user-timer installs/enables the user systemd timer when available
+  - --ensure-user-timer installs/enables the user systemd timer when available
 EOF
       exit 0
       ;;
