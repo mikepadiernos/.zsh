@@ -9,6 +9,12 @@ export SHELL="$(command -v zsh 2>/dev/null || print -r -- "${SHELL:-/bin/zsh}")"
 export EDITOR=nvim
 export DIRENV_SKIP_TIMEOUT=TRUE
 
+case "${EUID:-$(id -u 2>/dev/null)}:${ZSH_STARTUP_QUIET:-false}" in
+	0:*|*:1|*:true|*:yes|*:on)
+		export MISE_DISABLE_TOOLS="${MISE_DISABLE_TOOLS:-git,atuin}"
+		;;
+esac
+
 # Optional portability overrides (uncomment and edit per machine/user)
 # export ZSH_RUNTIME_USER="your-username"
 # export ZSH_SUDO_PASS_ENTRY="local/sudo/your-username"

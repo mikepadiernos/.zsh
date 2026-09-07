@@ -48,6 +48,11 @@ zsh_startup_log() {
 	echo -e "$@"
 }
 
+_zsh_startup_should_disable_mise_tools() {
+	(( EUID == 0 )) && return 0
+	zsh_startup_is_truthy "${ZSH_STARTUP_QUIET:-false}"
+}
+
 zsh_startup_profile_now_ms() {
 	if (( ${+EPOCHREALTIME} )); then
 		local -F 6 now_seconds
@@ -152,6 +157,10 @@ zsh_bootstrap_files=(
 for zsh_bootstrap_file in "${zsh_bootstrap_files[@]}"; do
 	source_if_exists "$zsh_bootstrap_file"
 done
+
+if _zsh_startup_should_disable_mise_tools; then
+	export MISE_DISABLE_TOOLS="${MISE_DISABLE_TOOLS:-git,atuin}"
+fi
 
 source_cached_init fzf --zsh
 source_cached_init atuin init zsh

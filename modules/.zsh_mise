@@ -3,6 +3,15 @@ __mise_setup_script="$HOME/.files/scripts/setup-mise.sh"
 __mise_local_bin="$HOME/.local/bin/mise"
 typeset -g ZSH_STARTUP_ALLOW_INSTALLS="${ZSH_STARTUP_ALLOW_INSTALLS:-false}"
 
+_zsh_mise_should_disable_tools() {
+  (( EUID == 0 )) && return 0
+  zsh_startup_is_truthy "${ZSH_STARTUP_QUIET:-false}"
+}
+
+if _zsh_mise_should_disable_tools; then
+  export MISE_DISABLE_TOOLS="${MISE_DISABLE_TOOLS:-git,atuin}"
+fi
+
 if ! command -v mise >/dev/null 2>&1 && [ -x "$__mise_setup_script" ]; then
   if zsh_startup_is_truthy "$ZSH_STARTUP_ALLOW_INSTALLS"; then
     bash "$__mise_setup_script" >/dev/null 2>&1
@@ -24,4 +33,6 @@ unset __mise_local_bin
 
 # Activate mise last so its PATH entries take precedence over brew/system tools
 source_if_exists "$ZSH_PLUGINS/zsh-mise/zsh-mise.plugin.zsh"
+
+unset -f _zsh_mise_should_disable_tools
 
