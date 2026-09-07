@@ -285,6 +285,7 @@ Nushell-inspired table listing (from `.zsh/modules/.zsh_table`):
 - `ZSH_NU_TABLE_STYLE`: default render style (`encoded` or `ascii`).
 - `ZSH_NU_TABLE_MIN_WIDTH_PERCENT`: encoded mode minimum width target as a percentage of terminal width (default `50`); table grows wider when content requires it.
 - If Nushell (`nu`) is installed and encoded mode is active, output uses Nushell table rendering; otherwise the local renderer is used.
+- Symlinks show inline as `name -> target` and are highlighted in cyan in the local renderer; symlink-containing listings fall back to the local renderer so the target stays visible.
 
 Example output (`nls --ascii`):
 
@@ -294,6 +295,7 @@ Example output (`nls --ascii`):
 +----+-----------+------+--------+------------------+
 | 0  | configs   | dir  | 320 B  | 2026-09-06 21:14 |
 | 1  | README.md | file | 17 KiB | 2026-09-06 20:20 |
+| 2  | plugins -> ../plugins | link | 4 B | 2026-09-06 20:20 |
 +----+-----------+------+--------+------------------+
 ```
 
@@ -305,6 +307,7 @@ Example output (`nls --encoded`):
 ├────┼───────────┼──────┼────────┼──────────────────┤
 │ 0  │ configs   │ dir  │ 320 B  │ 2026-09-06 21:14 │
 │ 1  │ README.md │ file │ 17 KiB │ 2026-09-06 20:20 │
+│ 2  │ plugins -> ../plugins │ link │ 4 B │ 2026-09-06 20:20 │
 ╰────┴───────────┴──────┴────────┴──────────────────╯
 ```
 

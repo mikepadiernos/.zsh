@@ -67,6 +67,8 @@ _nls_stat_size_epoch() {
 _nls_render_table() {
 	local style="${1:-ascii}"
 	local min_total_width="${2:-0}"
+	local link_color="${3:-}"
+	local reset_color="${4:-}"
 	local top_left="+"
 	local top_mid="+"
 	local top_right="+"
@@ -97,7 +99,7 @@ _nls_render_table() {
 			;;
 	esac
 
-	command awk -v min_total_width="$min_total_width" -v tl="$top_left" -v tm="$top_mid" -v tr="$top_right" -v ml="$mid_left" -v mm="$mid_mid" -v mr="$mid_right" -v bl="$bottom_left" -v bm="$bottom_mid" -v br="$bottom_right" -v h="$horizontal" -v v="$vertical" '
+	command awk -v min_total_width="$min_total_width" -v link_color="$link_color" -v reset_color="$reset_color" -v tl="$top_left" -v tm="$top_mid" -v tr="$top_right" -v ml="$mid_left" -v mm="$mid_mid" -v mr="$mid_right" -v bl="$bottom_left" -v bm="$bottom_mid" -v br="$bottom_right" -v h="$horizontal" -v v="$vertical" '
 	BEGIN { FS="\t" }
 	{
 		rows = NR
@@ -116,6 +118,14 @@ _nls_render_table() {
 		}
 		return out
 	}
+	function header_col_index(col_name, i) {
+		for (i = 1; i <= cols; i++) {
+			if (cells[1, i] == col_name) {
+				return i
+			}
+		}
+		return 0
+	}
 	function border(left, mid, right, line, i) {
 		line = left
 		for (i = 1; i <= cols; i++) {
@@ -132,7 +142,11 @@ _nls_render_table() {
 		line = v
 		for (i = 1; i <= cols; i++) {
 			value = cells[row_number, i]
-			line = line sprintf(" %-" widths[i] "s ", value)
+			value = sprintf(" %-" widths[i] "s ", value)
+			if (row_number > 1 && i == name_col && type_col > 0 && cells[row_number, type_col] == "link") {
+				value = link_color value reset_color
+			}
+			line = line value
 			line = line v
 		}
 		print line
@@ -141,6 +155,9 @@ _nls_render_table() {
 		if (rows == 0) {
 			exit 0
 		}
+
+		name_col = header_col_index("name")
+		type_col = header_col_index("type")
 
 		if (min_total_width > 0) {
 			current_total = 1
@@ -174,16 +191,41 @@ _nls_render_table() {
 	'
 }
 
+_nls_target_has_symlink() {
+	local target="$1"
+	local include_all="$2"
+	local -a entries
+	local entry=""
+
+	if [[ -d "$target" ]]; then
+		if [[ "$include_all" == true ]]; then
+			entries=("$target"/*(DN))
+		else
+			entries=("$target"/*(N))
+		fi
+	elif [[ -e "$target" || -L "$target" ]]; then
+		entries=("$target")
+	else
+		return 1
+	fi
+
+	for entry in "${entries[@]}"; do
+		[[ -L "$entry" ]] && return 0
+	done
+
+	return 1
+}
+
 _nls_type_for_path() {
 	local path="$1"
 
-	if [[ -d "$path" ]]; then
-		print -r -- "dir"
+	if [[ -L "$path" ]]; then
+		print -r -- "link"
 		return 0
 	fi
 
-	if [[ -L "$path" ]]; then
-		print -r -- "link"
+	if [[ -d "$path" ]]; then
+		print -r -- "dir"
 		return 0
 	fi
 
@@ -211,6 +253,7 @@ _nls_table_for_target() {
 	local modified=""
 	local item_type=""
 	local item_name=""
+	local link_target=""
 	local tab=$'\t'
 
 	if [[ -d "$target" ]]; then
@@ -244,12 +287,20 @@ _nls_table_for_target() {
 		item_name="${entry:t}"
 		item_name="${item_name//$'\t'/ }"
 		item_name="${item_name//$'\n'/ }"
+		if [[ "$item_type" == "link" ]]; then
+			link_target="$(command readlink -- "$entry" 2>/dev/null)"
+			link_target="${link_target//$'\t'/ }"
+			link_target="${link_target//$'\n'/ }"
+			if [[ -n "$link_target" ]]; then
+				item_name="${item_name} -> ${link_target}"
+			fi
+		fi
 
 		rows+=("$row_index${tab}$item_name${tab}$item_type${tab}$size_human${tab}$modified")
 		row_index=$(( row_index + 1 ))
 	done
 
-	printf '%s\n' "${rows[@]}" | _nls_render_table "$style" "$min_total_width"
+	printf '%s\n' "${rows[@]}" | _nls_render_table "$style" "$min_total_width" $'\033[36m' $'\033[0m'
 }
 
 _nls_terminal_columns() {
@@ -281,6 +332,7 @@ nls() {
 	local include_all=false
 	local table_style="${ZSH_NU_TABLE_STYLE:-ascii}"
 	local use_nu=true
+	local has_symlinks=false
 	local terminal_columns=0
 	local min_total_width=0
 	local width_percent="${ZSH_NU_TABLE_MIN_WIDTH_PERCENT:-50}"
@@ -319,6 +371,15 @@ nls() {
 
 	[[ "${(L)table_style}" == "ascii" ]] && use_nu=false
 
+	if [[ "$use_nu" == true ]] && command -v nu >/dev/null 2>&1; then
+		for target in "${targets[@]}"; do
+			if _nls_target_has_symlink "$target" "$include_all"; then
+				has_symlinks=true
+				break
+			fi
+		done
+	fi
+
 	if [[ "$width_percent" != <-> ]]; then
 		width_percent=50
 	fi
@@ -332,7 +393,7 @@ nls() {
 		fi
 	fi
 
-	if [[ "$use_nu" == true ]] && command -v nu >/dev/null 2>&1; then
+	if [[ "$use_nu" == true && "$has_symlinks" == false ]] && command -v nu >/dev/null 2>&1; then
 		for target in "${targets[@]}"; do
 			if (( ${#targets[@]} > 1 )); then
 				[[ "$first" == true ]] || printf '\n'
