@@ -278,16 +278,16 @@ Functions/wrappers:
 - nowrap / wrapon: terminal line wrapping toggles
 
 Nushell-inspired table listing (from `.zsh/modules/.zsh_table`):
-- `nls` / `lstable`: list files using a boxed table format inspired by Nushell `ls | table`.
-- `nls --encoded`: Unicode box-drawing table (default style).
-- `nls --ascii`: ASCII-only table borders for limited terminals.
-- `nls --all` / `nls --no-all`: include or exclude hidden entries.
+- `lll` / `lstable`: list files using a boxed table format inspired by Nushell `ls | table`.
+- `lll --encoded`: Unicode box-drawing table (default style).
+- `lll --ascii`: ASCII-only table borders for limited terminals.
+- `lll --all` / `lll --no-all`: include or exclude hidden entries.
 - `ZSH_NU_TABLE_STYLE`: default render style (`encoded` or `ascii`).
 - `ZSH_NU_TABLE_MIN_WIDTH_PERCENT`: encoded mode minimum width target as a percentage of terminal width (default `50`); table grows wider when content requires it.
 - If Nushell (`nu`) is installed and encoded mode is active, output uses Nushell table rendering; otherwise the local renderer is used.
 - Symlinks show inline as `name -> target` and are highlighted in cyan in the local renderer; symlink-containing listings fall back to the local renderer so the target stays visible.
 
-Example output (`nls --ascii`):
+Example output (`lll --ascii`):
 
 ```text
 +-----------------------+------+-------------+--------+--------+--------+-----------------------+
@@ -299,7 +299,7 @@ Example output (`nls --ascii`):
 +-----------------------+------+-------------+--------+--------+--------+-----------------------+
 ```
 
-Example output (`nls --encoded`):
+Example output (`lll --encoded`):
 
 ```text
 ╭───────────────────────┬──────┬─────────────┬────────┬────────┬────────┬───────────────────────╮
