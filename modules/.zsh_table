@@ -1,0 +1,365 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+typeset -g ZSH_NU_TABLE_USE_ALL="${ZSH_NU_TABLE_USE_ALL:-true}"
+typeset -g ZSH_NU_TABLE_STYLE="${ZSH_NU_TABLE_STYLE:-encoded}"
+typeset -g ZSH_NU_TABLE_MIN_WIDTH_PERCENT="${ZSH_NU_TABLE_MIN_WIDTH_PERCENT:-50}"
+
+_nls_human_size() {
+	local bytes="$1"
+	local -a units=("B" "KiB" "MiB" "GiB" "TiB" "PiB")
+	local unit_index=1
+	local scaled="$bytes"
+
+	[[ "$bytes" == <-> ]] || {
+		print -r -- "-"
+		return 0
+	}
+
+	while (( scaled >= 1024 && unit_index < ${#units[@]} )); do
+		scaled=$(( scaled / 1024 ))
+		unit_index=$(( unit_index + 1 ))
+	done
+
+	print -r -- "$scaled ${units[unit_index]}"
+}
+
+_nls_format_epoch() {
+	local epoch="$1"
+
+	[[ "$epoch" == <-> ]] || {
+		print -r -- "-"
+		return 0
+	}
+
+	if command date -d "@$epoch" '+%Y-%m-%d %H:%M' >/dev/null 2>&1; then
+		command date -d "@$epoch" '+%Y-%m-%d %H:%M'
+		return 0
+	fi
+
+	if command date -r "$epoch" '+%Y-%m-%d %H:%M' >/dev/null 2>&1; then
+		command date -r "$epoch" '+%Y-%m-%d %H:%M'
+		return 0
+	fi
+
+	print -r -- "-"
+}
+
+_nls_stat_size_epoch() {
+	local path="$1"
+	local stat_bin=""
+
+	if [[ -x "/usr/bin/stat" ]]; then
+		stat_bin="/usr/bin/stat"
+	elif [[ -x "/bin/stat" ]]; then
+		stat_bin="/bin/stat"
+	else
+		return 1
+	fi
+
+	if "$stat_bin" --version >/dev/null 2>&1; then
+		"$stat_bin" -c '%s|%Y' -- "$path" 2>/dev/null
+		return $?
+	fi
+
+	"$stat_bin" -f '%z|%m' -- "$path" 2>/dev/null
+}
+
+_nls_render_table() {
+	local style="${1:-ascii}"
+	local min_total_width="${2:-0}"
+	local top_left="+"
+	local top_mid="+"
+	local top_right="+"
+	local mid_left="+"
+	local mid_mid="+"
+	local mid_right="+"
+	local bottom_left="+"
+	local bottom_mid="+"
+	local bottom_right="+"
+	local horizontal="-"
+	local vertical="|"
+
+	case "${(L)style}" in
+		encoded|unicode|utf8|box)
+			top_left='╭'
+			top_mid='┬'
+			top_right='╮'
+			mid_left='├'
+			mid_mid='┼'
+			mid_right='┤'
+			bottom_left='╰'
+			bottom_mid='┴'
+			bottom_right='╯'
+			horizontal='─'
+			vertical='│'
+			;;
+		*)
+			;;
+	esac
+
+	command awk -v min_total_width="$min_total_width" -v tl="$top_left" -v tm="$top_mid" -v tr="$top_right" -v ml="$mid_left" -v mm="$mid_mid" -v mr="$mid_right" -v bl="$bottom_left" -v bm="$bottom_mid" -v br="$bottom_right" -v h="$horizontal" -v v="$vertical" '
+	BEGIN { FS="\t" }
+	{
+		rows = NR
+		cols = (NF > cols ? NF : cols)
+		for (i = 1; i <= NF; i++) {
+			cells[NR, i] = $i
+			if (length($i) > widths[i]) {
+				widths[i] = length($i)
+			}
+		}
+	}
+	function repeat(ch, count, out, i) {
+		out = ""
+		for (i = 0; i < count; i++) {
+			out = out ch
+		}
+		return out
+	}
+	function border(left, mid, right, line, i) {
+		line = left
+		for (i = 1; i <= cols; i++) {
+			line = line h repeat(h, widths[i]) h
+			if (i < cols) {
+				line = line mid
+			} else {
+				line = line right
+			}
+		}
+		return line
+	}
+	function render_row(row_number, line, i, value) {
+		line = v
+		for (i = 1; i <= cols; i++) {
+			value = cells[row_number, i]
+			line = line sprintf(" %-" widths[i] "s ", value)
+			line = line v
+		}
+		print line
+	}
+	END {
+		if (rows == 0) {
+			exit 0
+		}
+
+		if (min_total_width > 0) {
+			current_total = 1
+			for (i = 1; i <= cols; i++) {
+				current_total += widths[i] + 3
+			}
+
+			if (current_total < min_total_width) {
+				extra = min_total_width - current_total
+				grow_col = cols
+				for (i = 1; i <= cols; i++) {
+					if (cells[1, i] == "name") {
+						grow_col = i
+						break
+					}
+				}
+				widths[grow_col] += extra
+			}
+		}
+
+		print border(tl, tm, tr)
+		render_row(1)
+		print border(ml, mm, mr)
+
+		for (r = 2; r <= rows; r++) {
+			render_row(r)
+		}
+
+		print border(bl, bm, br)
+	}
+	'
+}
+
+_nls_type_for_path() {
+	local path="$1"
+
+	if [[ -d "$path" ]]; then
+		print -r -- "dir"
+		return 0
+	fi
+
+	if [[ -L "$path" ]]; then
+		print -r -- "link"
+		return 0
+	fi
+
+	if [[ -f "$path" ]]; then
+		print -r -- "file"
+		return 0
+	fi
+
+	print -r -- "other"
+}
+
+_nls_table_for_target() {
+	local target="$1"
+	local include_all="$2"
+	local style="$3"
+	local min_total_width="${4:-0}"
+	local -a entries
+	local -a rows
+	local entry=""
+	local row_index=0
+	local stats=""
+	local stats_size=""
+	local stats_epoch=""
+	local size_human=""
+	local modified=""
+	local item_type=""
+	local item_name=""
+	local tab=$'\t'
+
+	if [[ -d "$target" ]]; then
+		if [[ "$include_all" == true ]]; then
+			entries=("$target"/*(DN))
+		else
+			entries=("$target"/*(N))
+		fi
+	elif [[ -e "$target" || -L "$target" ]]; then
+		entries=("$target")
+	else
+		print -u2 -- "nls: cannot access '$target'"
+		return 1
+	fi
+
+	rows+=("#${tab}name${tab}type${tab}size${tab}modified")
+
+	for entry in "${entries[@]}"; do
+		stats="$(_nls_stat_size_epoch "$entry")"
+		if [[ -n "$stats" ]]; then
+			stats_size="${stats%%|*}"
+			stats_epoch="${stats##*|}"
+		else
+			stats_size=""
+			stats_epoch=""
+		fi
+
+		size_human="$(_nls_human_size "$stats_size")"
+		modified="$(_nls_format_epoch "$stats_epoch")"
+		item_type="$(_nls_type_for_path "$entry")"
+		item_name="${entry:t}"
+		item_name="${item_name//$'\t'/ }"
+		item_name="${item_name//$'\n'/ }"
+
+		rows+=("$row_index${tab}$item_name${tab}$item_type${tab}$size_human${tab}$modified")
+		row_index=$(( row_index + 1 ))
+	done
+
+	printf '%s\n' "${rows[@]}" | _nls_render_table "$style" "$min_total_width"
+}
+
+_nls_terminal_columns() {
+	local cols=""
+
+	if [[ "${COLUMNS:-}" == <-> ]] && (( COLUMNS > 0 )); then
+		print -r -- "$COLUMNS"
+		return 0
+	fi
+
+	if command -v tput >/dev/null 2>&1; then
+		cols="$(command tput cols 2>/dev/null)"
+		if [[ "$cols" == <-> ]] && (( cols > 0 )); then
+			print -r -- "$cols"
+			return 0
+		fi
+	fi
+
+	print -r -- "0"
+}
+
+nls() {
+	local -a targets
+	local -a raw_args
+	local arg=""
+	local target=""
+	local exit_code=0
+	local first=true
+	local include_all=false
+	local table_style="${ZSH_NU_TABLE_STYLE:-ascii}"
+	local use_nu=true
+	local terminal_columns=0
+	local min_total_width=0
+	local width_percent="${ZSH_NU_TABLE_MIN_WIDTH_PERCENT:-50}"
+
+	raw_args=("$@")
+	targets=()
+
+	for arg in "${raw_args[@]}"; do
+		case "$arg" in
+			--ascii)
+				table_style="ascii"
+				;;
+			--encoded|--unicode|--utf8|--box)
+				table_style="encoded"
+				;;
+			--all)
+				include_all=true
+				;;
+			--no-all)
+				include_all=false
+				;;
+			--help)
+				print -r -- "usage: nls [--ascii|--encoded] [--all|--no-all] [path ...]"
+				return 0
+				;;
+			*)
+				targets+=("$arg")
+				;;
+		esac
+	done
+
+	(( ${#targets[@]} )) || targets=(".")
+	if [[ "$include_all" == false ]]; then
+		zsh_startup_is_truthy "$ZSH_NU_TABLE_USE_ALL" && include_all=true
+	fi
+
+	[[ "${(L)table_style}" == "ascii" ]] && use_nu=false
+
+	if [[ "$width_percent" != <-> ]]; then
+		width_percent=50
+	fi
+	(( width_percent < 1 )) && width_percent=1
+	(( width_percent > 100 )) && width_percent=100
+
+	if [[ "${(L)table_style}" == "encoded" ]]; then
+		terminal_columns="$(_nls_terminal_columns)"
+		if [[ "$terminal_columns" == <-> ]] && (( terminal_columns > 0 )); then
+			min_total_width=$(( (terminal_columns * width_percent + 99) / 100 ))
+		fi
+	fi
+
+	if [[ "$use_nu" == true ]] && command -v nu >/dev/null 2>&1; then
+		for target in "${targets[@]}"; do
+			if (( ${#targets[@]} > 1 )); then
+				[[ "$first" == true ]] || printf '\n'
+				first=false
+				printf '==> %s <==\n' "$target"
+			fi
+
+			if zsh_startup_is_truthy "$ZSH_NU_TABLE_USE_ALL"; then
+				env NLS_TARGET="$target" command nu -c 'ls -a $env.NLS_TARGET | select name type size modified | table' || exit_code=$?
+			else
+				env NLS_TARGET="$target" command nu -c 'ls $env.NLS_TARGET | select name type size modified | table' || exit_code=$?
+			fi
+		done
+		return "$exit_code"
+	fi
+
+	for target in "${targets[@]}"; do
+		if (( ${#targets[@]} > 1 )); then
+			[[ "$first" == true ]] || printf '\n'
+			first=false
+			printf '==> %s <==\n' "$target"
+		fi
+
+		_nls_table_for_target "$target" "$include_all" "$table_style" "$min_total_width" || exit_code=$?
+	done
+
+	return "$exit_code"
+}
+
+alias lstable='nls'

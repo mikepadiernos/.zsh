@@ -277,6 +277,37 @@ Functions/wrappers:
 - yazi: VS Code-aware environment adjustments for renderer compatibility
 - nowrap / wrapon: terminal line wrapping toggles
 
+Nushell-inspired table listing (from `.zsh/modules/.zsh_table`):
+- `nls` / `lstable`: list files using a boxed table format inspired by Nushell `ls | table`.
+- `nls --encoded`: Unicode box-drawing table (default style).
+- `nls --ascii`: ASCII-only table borders for limited terminals.
+- `nls --all` / `nls --no-all`: include or exclude hidden entries.
+- `ZSH_NU_TABLE_STYLE`: default render style (`encoded` or `ascii`).
+- `ZSH_NU_TABLE_MIN_WIDTH_PERCENT`: encoded mode minimum width target as a percentage of terminal width (default `50`); table grows wider when content requires it.
+- If Nushell (`nu`) is installed and encoded mode is active, output uses Nushell table rendering; otherwise the local renderer is used.
+
+Example output (`nls --ascii`):
+
+```text
++----+-----------+------+--------+------------------+
+| #  | name      | type | size   | modified         |
++----+-----------+------+--------+------------------+
+| 0  | configs   | dir  | 320 B  | 2026-09-06 21:14 |
+| 1  | README.md | file | 17 KiB | 2026-09-06 20:20 |
++----+-----------+------+--------+------------------+
+```
+
+Example output (`nls --encoded`):
+
+```text
+╭────┬───────────┬──────┬────────┬──────────────────╮
+│ #  │ name      │ type │ size   │ modified         │
+├────┼───────────┼──────┼────────┼──────────────────┤
+│ 0  │ configs   │ dir  │ 320 B  │ 2026-09-06 21:14 │
+│ 1  │ README.md │ file │ 17 KiB │ 2026-09-06 20:20 │
+╰────┴───────────┴──────┴────────┴──────────────────╯
+```
+
 Conditional aliases:
 - fileu and filec when FileCentipede app dir exists
 

@@ -11,6 +11,7 @@ zsh_module_files=(
 	"${ZSH_MODULES}/.zsh_gh"
 	"${ZSH_MODULES}/.zsh_node"
 	"${ZSH_MODULES}/.zsh_docker"
+	"${ZSH_MODULES}/.zsh_table"
 	"${ZSH_MODULES}/.zsh_nocsd"
 	"${ZSH_MODULES}/.zsh_nvidia"
 	# mise must activate last so its PATH entries take precedence over brew/system tools
