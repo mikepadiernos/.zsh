@@ -290,25 +290,25 @@ Nushell-inspired table listing (from `.zsh/modules/.zsh_table`):
 Example output (`nls --ascii`):
 
 ```text
-+----+-----------+------+--------+------------------+
-| #  | name      | type | size   | modified         |
-+----+-----------+------+--------+------------------+
-| 0  | configs   | dir  | 320 B  | 2026-09-06 21:14 |
-| 1  | README.md | file | 17 KiB | 2026-09-06 20:20 |
-| 2  | plugins -> ../plugins | link | 4 B | 2026-09-06 20:20 |
-+----+-----------+------+--------+------------------+
++-----------------------+------+-------------+--------+--------+--------+-----------------------+
+| name                  | type | permissions | owner  | group  | size   | modified              |
++-----------------------+------+-------------+--------+--------+--------+-----------------------+
+| configs               | dir  | drwxr-xr-x  | runner | runner | 320 B  | 2026.09.06 - 21:14:00 |
+| README.md             | file | -rw-r--r--  | runner | runner | 17 KiB | 2026.09.06 - 20:20:00 |
+| plugins -> ../plugins | link | lrwxrwxrwx  | runner | runner | 4 B    | 2026.09.06 - 20:20:00 |
++-----------------------+------+-------------+--------+--------+--------+-----------------------+
 ```
 
 Example output (`nls --encoded`):
 
 ```text
-╭────┬───────────┬──────┬────────┬──────────────────╮
-│ #  │ name      │ type │ size   │ modified         │
-├────┼───────────┼──────┼────────┼──────────────────┤
-│ 0  │ configs   │ dir  │ 320 B  │ 2026-09-06 21:14 │
-│ 1  │ README.md │ file │ 17 KiB │ 2026-09-06 20:20 │
-│ 2  │ plugins -> ../plugins │ link │ 4 B │ 2026-09-06 20:20 │
-╰────┴───────────┴──────┴────────┴──────────────────╯
+╭───────────────────────┬──────┬─────────────┬────────┬────────┬────────┬───────────────────────╮
+│ name                  │ type │ permissions │ owner  │ group  │ size   │ modified              │
+├───────────────────────┼──────┼─────────────┼────────┼────────┼────────┼───────────────────────┤
+│ configs               │ dir  │ drwxr-xr-x  │ runner │ runner │ 320 B  │ 2026.09.06 - 21:14:00 │
+│ README.md             │ file │ -rw-r--r--  │ runner │ runner │ 17 KiB │ 2026.09.06 - 20:20:00 │
+│ plugins -> ../plugins │ link │ lrwxrwxrwx  │ runner │ runner │ 4 B    │ 2026.09.06 - 20:20:00 │
+╰───────────────────────┴──────┴─────────────┴────────┴────────┴────────┴───────────────────────╯
 ```
 
 Conditional aliases:
@@ -566,6 +566,7 @@ The plugin list in this setup may use personal forks for maintenance, but these 
 - zsh-fzf-git-branches: https://github.com/awerebea/fzf-git-branches
 - zsh-fzf-plugin: https://github.com/unixorn/fzf-zsh-plugin
 - zsh-fzf-tab: https://github.com/Aloxaf/fzf-tab
+- zsh-job-queue: https://github.com/dosisod/zsh-job-queue
 - zsh-magic-dashboard: https://github.com/chrisgrieser/zsh-magic-dashboard
 - zsh-mise: https://github.com/wintermi/zsh-mise
 - zsh-ssh: https://github.com/sunlei/zsh-ssh
