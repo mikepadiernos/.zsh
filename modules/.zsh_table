@@ -31,13 +31,13 @@ _nls_format_epoch() {
 		return 0
 	}
 
-	if command date -d "@$epoch" '+%Y-%m-%d %H:%M' >/dev/null 2>&1; then
-		command date -d "@$epoch" '+%Y-%m-%d %H:%M'
+	if command date -d "@$epoch" '+%Y.%m.%d - %H:%M:%S' >/dev/null 2>&1; then
+		command date -d "@$epoch" '+%Y.%m.%d - %H:%M:%S'
 		return 0
 	fi
 
-	if command date -r "$epoch" '+%Y-%m-%d %H:%M' >/dev/null 2>&1; then
-		command date -r "$epoch" '+%Y-%m-%d %H:%M'
+	if command date -r "$epoch" '+%Y.%m.%d - %H:%M:%S' >/dev/null 2>&1; then
+		command date -r "$epoch" '+%Y.%m.%d - %H:%M:%S'
 		return 0
 	fi
 
@@ -62,6 +62,38 @@ _nls_stat_size_epoch() {
 	fi
 
 	"$stat_bin" -f '%z|%m' -- "$path" 2>/dev/null
+}
+
+_nls_stat_mode_owner_group() {
+	local path="$1"
+	local stat_bin=""
+	local permissions="-"
+	local owner="-"
+	local group="-"
+
+	if [[ -x "/usr/bin/stat" ]]; then
+		stat_bin="/usr/bin/stat"
+	elif [[ -x "/bin/stat" ]]; then
+		stat_bin="/bin/stat"
+	else
+		print -r -- "-|-|-"
+		return 0
+	fi
+
+	if "$stat_bin" --version >/dev/null 2>&1; then
+		permissions="$($stat_bin -c '%A' -- "$path" 2>/dev/null)"
+		owner="$($stat_bin -c '%U' -- "$path" 2>/dev/null)"
+		group="$($stat_bin -c '%G' -- "$path" 2>/dev/null)"
+	else
+		permissions="$($stat_bin -f '%p' -- "$path" 2>/dev/null)"
+		owner="$($stat_bin -f '%Su' -- "$path" 2>/dev/null)"
+		group="$($stat_bin -f '%Sg' -- "$path" 2>/dev/null)"
+	fi
+
+	permissions="${permissions:--}"
+	owner="${owner:--}"
+	group="${group:--}"
+	print -r -- "${permissions}|${owner}|${group}"
 }
 
 _nls_render_table() {
@@ -100,7 +132,18 @@ _nls_render_table() {
 	esac
 
 	command awk -v min_total_width="$min_total_width" -v link_color="$link_color" -v reset_color="$reset_color" -v tl="$top_left" -v tm="$top_mid" -v tr="$top_right" -v ml="$mid_left" -v mm="$mid_mid" -v mr="$mid_right" -v bl="$bottom_left" -v bm="$bottom_mid" -v br="$bottom_right" -v h="$horizontal" -v v="$vertical" '
-	BEGIN { FS="\t" }
+	BEGIN {
+		FS = "\t"
+		border_color = "\033[37m"
+		header_color = "\033[1;37m"
+		permissions_color = "\033[35m"
+		owner_color = "\033[33m"
+		group_color = "\033[1;35m"
+		file_color = "\033[34m"
+		dir_color = "\033[32m"
+		size_color = "\033[36m"
+		modified_color = "\033[38;5;245m"
+	}
 	{
 		rows = NR
 		cols = (NF > cols ? NF : cols)
@@ -138,16 +181,57 @@ _nls_render_table() {
 		}
 		return line
 	}
-	function render_row(row_number, line, i, value) {
-		line = v
-		for (i = 1; i <= cols; i++) {
-			value = cells[row_number, i]
-			value = sprintf(" %-" widths[i] "s ", value)
-			if (row_number > 1 && i == name_col && type_col > 0 && cells[row_number, type_col] == "link") {
-				value = link_color value reset_color
+	function render_cell(row_number, col_index, raw_value, value, header_name, type_value, color) {
+		raw_value = cells[row_number, col_index]
+		header_name = cells[1, col_index]
+		value = sprintf(" %-" widths[col_index] "s ", raw_value)
+
+		if (row_number == 1) {
+			return header_color value reset_color
+		}
+
+		if (header_name == "permissions") {
+			return permissions_color value reset_color
+		}
+		if (header_name == "owner") {
+			return owner_color value reset_color
+		}
+		if (header_name == "group") {
+			return group_color value reset_color
+		}
+		if (header_name == "name") {
+			if (type_col > 0 && cells[row_number, type_col] == "link") {
+				return link_color value reset_color
 			}
+			if (type_col > 0 && cells[row_number, type_col] == "dir") {
+				return dir_color value reset_color
+			}
+			if (type_col > 0 && cells[row_number, type_col] == "file") {
+				return file_color value reset_color
+			}
+			return file_color value reset_color
+		}
+		if (header_name == "type") {
+			type_value = cells[row_number, col_index]
+			if (type_value == "dir") return dir_color value reset_color
+			if (type_value == "file") return file_color value reset_color
+			if (type_value == "link") return link_color value reset_color
+			return value
+		}
+		if (header_name == "size") {
+			return size_color value reset_color
+		}
+		if (header_name == "modified") {
+			return modified_color value reset_color
+		}
+		return value
+	}
+	function render_row(row_number, line, i, value) {
+		line = border_color v reset_color
+		for (i = 1; i <= cols; i++) {
+			value = render_cell(row_number, i)
 			line = line value
-			line = line v
+			line = line border_color v reset_color
 		}
 		print line
 	}
@@ -178,18 +262,19 @@ _nls_render_table() {
 			}
 		}
 
-		print border(tl, tm, tr)
+		print border_color border(tl, tm, tr) reset_color
 		render_row(1)
-		print border(ml, mm, mr)
+		print border_color border(ml, mm, mr) reset_color
 
 		for (r = 2; r <= rows; r++) {
 			render_row(r)
 		}
 
-		print border(bl, bm, br)
+		print border_color border(bl, bm, br) reset_color
 	}
 	'
 }
+
 
 _nls_target_has_symlink() {
 	local target="$1"
@@ -242,6 +327,8 @@ _nls_table_for_target() {
 	local include_all="$2"
 	local style="$3"
 	local min_total_width="${4:-0}"
+	local sort_field="${5:-default}"
+	local sort_dir="${6:-asc}"
 	local -a entries
 	local -a rows
 	local entry=""
@@ -254,6 +341,7 @@ _nls_table_for_target() {
 	local item_type=""
 	local item_name=""
 	local link_target=""
+	local row_label=""
 	local tab=$'\t'
 
 	if [[ -d "$target" ]]; then
@@ -269,7 +357,105 @@ _nls_table_for_target() {
 		return 1
 	fi
 
-	rows+=("#${tab}name${tab}type${tab}size${tab}modified")
+	local -a sorted_entries=()
+	local -a sort_lines=()
+	local -a sort_args=()
+	local sort_line=""
+	local sort_output=""
+	local sort_bucket=""
+	local sort_key1="0"
+	local sort_key2="0"
+	local sort_name=""
+	local sort_type=""
+	local sort_entry=""
+
+	if [[ "$sort_field" == "default" ]]; then
+		for sort_entry in "${entries[@]}"; do
+			sort_name="${sort_entry:t}"
+			sort_type="$(_nls_type_for_path "$sort_entry")"
+			sort_bucket="4"
+			case "$sort_type" in
+				dir)
+					if [[ "$sort_name" == .* ]]; then
+						sort_bucket="00"
+					else
+						sort_bucket="10"
+					fi
+					;;
+				link)
+					if [[ -d "$sort_entry" ]]; then
+						if [[ "$sort_name" == .* ]]; then
+							sort_bucket="00"
+						else
+							sort_bucket="10"
+						fi
+					else
+						if [[ "$sort_name" == .* ]]; then
+							sort_bucket="20"
+						else
+							sort_bucket="30"
+						fi
+					fi
+					;;
+				file)
+					if [[ "$sort_name" == .* ]]; then
+						sort_bucket="20"
+					else
+						sort_bucket="30"
+					fi
+					;;
+				*)
+					sort_bucket="40"
+					;;
+			esac
+			printf -v sort_line '%s\t%s\t%s' "$sort_bucket" "${sort_name:l}" "$sort_entry"
+			sort_lines+=("$sort_line")
+		done
+		if (( ${#sort_lines[@]} > 0 )); then
+			sort_output="$(printf '%s\n' "${sort_lines[@]}" | sort -t $'\t' -k1,1 -k2,2 | cut -f3-)"
+			entries=("${(@f)sort_output}")
+		fi
+	else
+		for sort_entry in "${entries[@]}"; do
+			sort_name="${sort_entry:t}"
+			sort_key1="0"
+			sort_key2="0"
+			stats="$(_nls_stat_size_epoch "$sort_entry")"
+			if [[ -n "$stats" ]]; then
+				sort_key1="${stats%%|*}"
+				sort_key2="${stats##*|}"
+			fi
+			if [[ "$sort_field" == "size" ]]; then
+				printf -v sort_line '%020d\t%s\t%s' "$sort_key1" "${sort_name:l}" "$sort_entry"
+			elif [[ "$sort_field" == "modified" ]]; then
+				printf -v sort_line '%020d\t%s\t%s' "$sort_key2" "${sort_name:l}" "$sort_entry"
+			elif [[ "$sort_field" == "both" ]]; then
+				printf -v sort_line '%020d\t%020d\t%s\t%s' "$sort_key1" "$sort_key2" "${sort_name:l}" "$sort_entry"
+			else
+				printf -v sort_line '%s\t%s\t%s' "0" "${sort_name:l}" "$sort_entry"
+			fi
+			sort_lines+=("$sort_line")
+		done
+		if (( ${#sort_lines[@]} > 0 )); then
+			if [[ "$sort_field" == "both" ]]; then
+				if [[ "$sort_dir" == "desc" || "$sort_dir" == "dsc" ]]; then
+					sort_args=(-t $'\t' -k1,1nr -k2,2nr)
+				else
+					sort_args=(-t $'\t' -k1,1n -k2,2n)
+				fi
+			else
+				if [[ "$sort_dir" == "desc" || "$sort_dir" == "dsc" ]]; then
+					sort_args=(-t $'\t' -k1,1nr -k2,2)
+				else
+					sort_args=(-t $'\t' -k1,1n -k2,2)
+				fi
+			fi
+			sort_output="$(printf '%s\n' "${sort_lines[@]}" | sort "${sort_args[@]}" | cut -f3-)"
+			entries=("${(@f)sort_output}")
+		fi
+	fi
+
+	rows+=("${tab}name${tab}type${tab}permissions${tab}owner${tab}group${tab}size${tab}modified")
 
 	for entry in "${entries[@]}"; do
 		stats="$(_nls_stat_size_epoch "$entry")"
@@ -279,6 +465,18 @@ _nls_table_for_target() {
 		else
 			stats_size=""
 			stats_epoch=""
+		fi
+
+		local stat_meta=""
+		local permissions="-"
+		local owner="-"
+		local group="-"
+		stat_meta="$(_nls_stat_mode_owner_group "$entry")"
+		if [[ -n "$stat_meta" ]]; then
+			permissions="${stat_meta%%|*}"
+			stat_meta="${stat_meta#*|}"
+			owner="${stat_meta%%|*}"
+			group="${stat_meta##*|}"
 		fi
 
 		size_human="$(_nls_human_size "$stats_size")"
@@ -296,7 +494,8 @@ _nls_table_for_target() {
 			fi
 		fi
 
-		rows+=("$row_index${tab}$item_name${tab}$item_type${tab}$size_human${tab}$modified")
+		printf -v row_label '%02d' "$row_index"
+		rows+=("$row_label${tab}$item_name${tab}$item_type${tab}$permissions${tab}$owner${tab}$group${tab}$size_human${tab}$modified")
 		row_index=$(( row_index + 1 ))
 	done
 
@@ -336,6 +535,8 @@ nls() {
 	local terminal_columns=0
 	local min_total_width=0
 	local width_percent="${ZSH_NU_TABLE_MIN_WIDTH_PERCENT:-50}"
+	local sort_field="default"
+	local sort_dir="asc"
 
 	raw_args=("$@")
 	targets=()
@@ -354,8 +555,42 @@ nls() {
 			--no-all)
 				include_all=false
 				;;
+			--sort=*)
+				sort_field="${arg#*=}"
+				sort_field="${(L)sort_field}"
+				;;
+			--sort-size|--size-asc)
+				sort_field="size"
+				sort_dir="asc"
+				;;
+			--size-dsc|--size-desc)
+				sort_field="size"
+				sort_dir="desc"
+				;;
+			--sort-modified|--modified-asc)
+				sort_field="modified"
+				sort_dir="asc"
+				;;
+			--modified-dsc|--modified-desc)
+				sort_field="modified"
+				sort_dir="desc"
+				;;
+			--sort-both|--both-asc)
+				sort_field="both"
+				sort_dir="asc"
+				;;
+			--both-dsc|--both-desc)
+				sort_field="both"
+				sort_dir="desc"
+				;;
+			--asc|--ascending)
+				sort_dir="asc"
+				;;
+			--desc|--dsc|--descending)
+				sort_dir="desc"
+				;;
 			--help)
-				print -r -- "usage: nls [--ascii|--encoded] [--all|--no-all] [path ...]"
+				print -r -- "usage: nls [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
 				return 0
 				;;
 			*)
@@ -402,9 +637,9 @@ nls() {
 			fi
 
 			if zsh_startup_is_truthy "$ZSH_NU_TABLE_USE_ALL"; then
-				env NLS_TARGET="$target" command nu -c 'ls -a $env.NLS_TARGET | select name type size modified | table' || exit_code=$?
+				env NLS_TARGET="$target" command nu -c 'ls -a $env.NLS_TARGET | sort-by type | select name type permissions owner group size modified | table' || exit_code=$?
 			else
-				env NLS_TARGET="$target" command nu -c 'ls $env.NLS_TARGET | select name type size modified | table' || exit_code=$?
+				env NLS_TARGET="$target" command nu -c 'ls $env.NLS_TARGET | sort-by type | select name type permissions owner group size modified | table' || exit_code=$?
 			fi
 		done
 		return "$exit_code"
@@ -417,7 +652,7 @@ nls() {
 			printf '==> %s <==\n' "$target"
 		fi
 
-		_nls_table_for_target "$target" "$include_all" "$table_style" "$min_total_width" || exit_code=$?
+		_nls_table_for_target "$target" "$include_all" "$table_style" "$min_total_width" "$sort_field" "$sort_dir" || exit_code=$?
 	done
 
 	return "$exit_code"
