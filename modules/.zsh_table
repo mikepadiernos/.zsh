@@ -560,6 +560,121 @@ _lll_terminal_columns() {
 	print -r -- "0"
 }
 
+_lll_fast_table_for_target() {
+	local target="${1:-.}"
+	local include_all="${2:-false}"
+	local style="${3:-ascii}"
+	local sort_field="${4:-default}"
+	local sort_dir="${5:-asc}"
+	local -a eza_args=()
+	local -a rows=()
+	local line=""
+	local permissions=""
+	local links=""
+	local owner=""
+	local group=""
+	local size=""
+	local date=""
+	local timestamp=""
+	local time_marker=""
+	local item_name=""
+	local item_type=""
+	local rest=""
+	local row_index=0
+	local row_label=""
+	local eza_output=""
+	local tab=$'\t'
+
+	eza_args=(--long --group --color=never --time-style='+%Y.%m.%d - %H:%M:%S' --group-directories-first)
+	case "$sort_field" in
+		size)
+			eza_args+=(--sort=size)
+			[[ "$sort_dir" == "desc" || "$sort_dir" == "dsc" ]] && eza_args+=(--reverse)
+			;;
+		modified)
+			eza_args+=(--sort=modified)
+			[[ "$sort_dir" == "desc" || "$sort_dir" == "dsc" ]] && eza_args+=(--reverse)
+			;;
+		both)
+			eza_args+=(--sort=size)
+			[[ "$sort_dir" == "desc" || "$sort_dir" == "dsc" ]] && eza_args+=(--reverse)
+			;;
+		*)
+			;;
+	esac
+	if [[ "$include_all" == true ]]; then
+		eza_args+=(--all)
+	fi
+
+	eza_output="$(command eza "${eza_args[@]}" -- "$target" 2>/dev/null)" || return 1
+	rows+=("${tab}name${tab}type${tab}permissions${tab}owner${tab}group${tab}size${tab}modified")
+
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		[[ "$line" =~ ^[[:space:]]*$ ]] && continue
+		[[ "$line" == total* ]] && continue
+
+		permissions=""
+		size=""
+		owner=""
+		group=""
+		date=""
+		time_marker=""
+		timestamp=""
+		item_name=""
+
+		if [[ "$line" =~ ^([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)$ ]]; then
+			permissions="${match[1]}"
+			size="${match[2]}"
+			owner="${match[3]}"
+			group="${match[4]}"
+			date="${match[5]}"
+			time_marker="${match[6]}"
+			timestamp="${match[7]}"
+			item_name="${match[8]}"
+		else
+			continue
+		fi
+
+		if [[ -n "$timestamp" && "$time_marker" == "-" ]]; then
+			modified="${date} - ${timestamp}"
+		else
+			modified="${date}"
+		fi
+		if [[ "$permissions" == d* ]]; then
+			item_type="dir"
+		elif [[ "$permissions" == l* ]]; then
+			item_type="link"
+		elif [[ "$permissions" == -* ]]; then
+			item_type="file"
+		else
+			item_type="other"
+		fi
+
+		printf -v row_label '%02d' "$row_index"
+		rows+=("$row_label${tab}$item_name${tab}$item_type${tab}$permissions${tab}$owner${tab}$group${tab}$size${tab}$modified")
+		row_index=$(( row_index + 1 ))
+	done <<< "$eza_output"
+
+	if (( ${#rows[@]} > 1 )); then
+		local terminal_columns=0
+		local min_total_width=0
+		local width_percent="${ZSH_NU_TABLE_MIN_WIDTH_PERCENT:-50}"
+		terminal_columns="$(_lll_terminal_columns)"
+		if [[ "$terminal_columns" == <-> ]] && (( terminal_columns > 0 )); then
+			if [[ "$width_percent" != <-> ]]; then
+				width_percent=50
+			fi
+			(( width_percent < 1 )) && width_percent=1
+			(( width_percent > 100 )) && width_percent=100
+			min_total_width=$(( (terminal_columns * width_percent + 99) / 100 ))
+		fi
+		printf '%s\n' "${rows[@]}" | _lll_render_table "$style" "$min_total_width" $'\033[36m' $'\033[0m'
+		return 0
+	fi
+	return 0
+}
+
 lll_table() {
 	local -a targets
 	local -a raw_args
@@ -568,6 +683,7 @@ lll_table() {
 	local exit_code=0
 	local first=true
 	local include_all=false
+	local use_fast=false
 	local table_style="${ZSH_NU_TABLE_STYLE:-ascii}"
 	local use_nu=true
 	local has_symlinks=false
@@ -582,6 +698,9 @@ lll_table() {
 
 	for arg in "${raw_args[@]}"; do
 		case "$arg" in
+			--fast)
+				use_fast=true
+				;;
 			--ascii)
 				table_style="ascii"
 				;;
@@ -629,7 +748,7 @@ lll_table() {
 				sort_dir="desc"
 				;;
 			--help)
-				print -r -- "usage: lll [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
+				print -r -- "usage: lll [--fast] [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
 				return 0
 				;;
 			*)
@@ -637,6 +756,22 @@ lll_table() {
 				;;
 		esac
 	done
+
+	if [[ "$use_fast" == true ]]; then
+		if command -v eza >/dev/null 2>&1; then
+			(( ${#targets[@]} )) || targets=(".")
+			for target in "${targets[@]}"; do
+				if (( ${#targets[@]} > 1 )); then
+					[[ "$first" == true ]] || printf '\n'
+					first=false
+					printf '==> %s <==\n' "$target"
+				fi
+				_lll_fast_table_for_target "$target" "$include_all" "$table_style" "$sort_field" "$sort_dir" || exit_code=$?
+			done
+			return "$exit_code"
+		fi
+		print -u2 -- "lll: --fast requested but eza is not installed; falling back to the rich table renderer"
+	fi
 
 	(( ${#targets[@]} )) || targets=(".")
 	if [[ "$include_all" == false ]]; then
@@ -664,11 +799,9 @@ lll_table() {
 	(( width_percent < 1 )) && width_percent=1
 	(( width_percent > 100 )) && width_percent=100
 
-	if [[ "${(L)table_style}" == "encoded" ]]; then
-		terminal_columns="$(_lll_terminal_columns)"
-		if [[ "$terminal_columns" == <-> ]] && (( terminal_columns > 0 )); then
-			min_total_width=$(( (terminal_columns * width_percent + 99) / 100 ))
-		fi
+	terminal_columns="$(_lll_terminal_columns)"
+	if [[ "$terminal_columns" == <-> ]] && (( terminal_columns > 0 )); then
+		min_total_width=$(( (terminal_columns * width_percent + 99) / 100 ))
 	fi
 
 	if [[ "$use_nu" == true && "$has_symlinks" == false ]] && command -v nu >/dev/null 2>&1; then

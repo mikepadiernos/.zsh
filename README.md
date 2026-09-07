@@ -281,6 +281,7 @@ Nushell-inspired table listing (from `.zsh/modules/.zsh_table`):
 - `lll`: canonical table-listing command.
 - `nls`: compatibility alias for `lll` kept for older workflows.
 - `lstable`: alias for `lll`.
+- `lll --fast`: quick pass through `eza --long --grid` when `eza` is installed; otherwise it falls back to the rich table renderer.
 - `lll --encoded`: Unicode box-drawing table (default style).
 - `lll --ascii`: ASCII-only table borders for limited terminals.
 - `lll --all` / `lll --no-all`: include or exclude hidden entries.
