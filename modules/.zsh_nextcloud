@@ -1,0 +1,134 @@
+# shellcheck shell=bash disable=SC1090,SC1091
+
+# Optional Nextcloud workflow helpers.
+# Usage pattern: configure a rclone remote named nextcloud, then use
+# nextcloud_sync_up / nextcloud_sync_down / nextcloud_mount.
+
+typeset -g NEXTCLOUD_REMOTE_NAME="${NEXTCLOUD_REMOTE_NAME:-nextcloud}"
+typeset -g NEXTCLOUD_REMOTE_PATH="${NEXTCLOUD_REMOTE_PATH:-/}"
+typeset -g NEXTCLOUD_LOCAL_DIR="${NEXTCLOUD_LOCAL_DIR:-$HOME/Nextcloud}"
+
+_zsh_nextcloud_require_rclone() {
+	if ! command -v rclone >/dev/null 2>&1; then
+		echo "nextcloud: rclone not found in PATH"
+		return 1
+	fi
+
+	if ! rclone config show "$NEXTCLOUD_REMOTE_NAME" >/dev/null 2>&1; then
+		echo "nextcloud: remote '$NEXTCLOUD_REMOTE_NAME' is not configured in rclone"
+		echo "nextcloud: try: rclone config"
+		return 1
+	fi
+
+	return 0
+}
+
+_zsh_nextcloud_repo_path() {
+	local remote_path="${1:-$NEXTCLOUD_REMOTE_PATH}"
+	local repo_path="${remote_path:-/}"
+	if [[ "$repo_path" != /* ]]; then
+		repo_path="/${repo_path}"
+	fi
+	print -r -- "$repo_path"
+}
+
+nextcloud_ls() {
+	local remote_path=""
+	_zsh_nextcloud_require_rclone || return 1
+	if (( $# > 0 )); then
+		remote_path="$(_zsh_nextcloud_repo_path "$1")"
+	else
+		remote_path="$(_zsh_nextcloud_repo_path "$NEXTCLOUD_REMOTE_PATH")"
+	fi
+	command rclone lsd "$NEXTCLOUD_REMOTE_NAME:$remote_path"
+}
+
+nextcloud_sync() {
+	local mode="${1:-up}"
+	local local_dir="${NEXTCLOUD_LOCAL_DIR}"
+	local remote_path="${NEXTCLOUD_REMOTE_PATH}"
+	local dry_run=0
+
+	shift 1 2>/dev/null || true
+	while (( $# > 0 )); do
+		case "$1" in
+			--dry-run|-n)
+				dry_run=1
+				;;
+			--remote-path|--remote)
+				shift
+				if (( $# > 0 )); then
+					remote_path="$1"
+				fi
+				;;
+			--local-dir|--local)
+				shift
+				if (( $# > 0 )); then
+					local_dir="$1"
+				fi
+				;;
+			*)
+				break
+				;;
+		esac
+		shift
+	done
+
+	_zsh_nextcloud_require_rclone || return 1
+	remote_path="$(_zsh_nextcloud_repo_path "$remote_path")"
+
+	case "$mode" in
+		up|upload)
+			if (( dry_run )); then
+				command rclone sync --dry-run "$local_dir" "$NEXTCLOUD_REMOTE_NAME:$remote_path"
+			else
+				command rclone sync "$local_dir" "$NEXTCLOUD_REMOTE_NAME:$remote_path"
+			fi
+			return $?
+			;;
+		down|download)
+			if (( dry_run )); then
+				command rclone sync --dry-run "$NEXTCLOUD_REMOTE_NAME:$remote_path" "$local_dir"
+			else
+				command rclone sync "$NEXTCLOUD_REMOTE_NAME:$remote_path" "$local_dir"
+			fi
+			return $?
+			;;
+		*)
+			echo "nextcloud_sync: usage: nextcloud_sync [up|down] [--remote-path <path>] [--local-dir <dir>] [--dry-run]"
+			return 1
+			;;
+	esac
+}
+
+nextcloud_sync_up() {
+	nextcloud_sync up "$@"
+}
+
+nextcloud_sync_down() {
+	nextcloud_sync down "$@"
+}
+
+nextcloud_mount() {
+	local mount_point="${1:-$HOME/Nextcloud/mounted}"
+	local remote_path="${NEXTCLOUD_REMOTE_PATH}"
+	_zsh_nextcloud_require_rclone || return 1
+	if (( $# > 1 )); then
+		remote_path="$2"
+	fi
+	remote_path="$(_zsh_nextcloud_repo_path "$remote_path")"
+	mkdir -p "$mount_point" 2>/dev/null || true
+	command rclone mount "$NEXTCLOUD_REMOTE_NAME:$remote_path" "$mount_point" --daemon
+}
+
+# Convenience aliases.
+alias nextcloud-sync='nextcloud_sync'
+alias nextcloud-sync-up='nextcloud_sync_up'
+alias nextcloud-sync-down='nextcloud_sync_down'
+alias nextcloud-ls='nextcloud_ls'
+alias nextcloud-mount='nextcloud_mount'
+alias nc-ls='nextcloud_ls'
+alias nc-sync='nextcloud_sync'
+alias nc-up='nextcloud_sync_up'
+alias nc-down='nextcloud_sync_down'
+alias nc-mount='nextcloud_mount'

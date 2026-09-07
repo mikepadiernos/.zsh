@@ -441,6 +441,34 @@ After setup, reload the shell:
 
 - source ~/.zshrc
 
+### Nextcloud Workflow
+
+The framework includes a Nextcloud helper module for a simple `rclone`-based workflow.
+
+Typical setup:
+
+1. Configure a `rclone` remote named `nextcloud`:
+- rclone config
+2. Set the local directory and remote path in the shell if needed:
+- export NEXTCLOUD_LOCAL_DIR="$HOME/Nextcloud"
+- export NEXTCLOUD_REMOTE_NAME="nextcloud"
+- export NEXTCLOUD_REMOTE_PATH="/"
+3. Use the helpers:
+- nextcloud-sync-up
+- nextcloud-sync-down
+- nextcloud-sync up
+- nextcloud-sync down
+- nextcloud-mount
+- nextcloud-ls
+
+Examples:
+
+- nextcloud-sync-up
+- nextcloud-sync down --dry-run
+- nextcloud-mount "$HOME/Nextcloud/mounted"
+
+The helpers use `rclone sync` so they work best when your Nextcloud remote is already configured via `rclone`.
+
 ### Daily Workflow
 
 1. Start shell and verify:
