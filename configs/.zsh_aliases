@@ -1,5 +1,6 @@
 # zsh-eza
 alias li='la --icons=always'
+alias nls='lll'
 
 # lazydocker
 alias lzd='lazydocker'

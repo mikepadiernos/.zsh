@@ -4,7 +4,46 @@ typeset -g ZSH_NU_TABLE_USE_ALL="${ZSH_NU_TABLE_USE_ALL:-true}"
 typeset -g ZSH_NU_TABLE_STYLE="${ZSH_NU_TABLE_STYLE:-encoded}"
 typeset -g ZSH_NU_TABLE_MIN_WIDTH_PERCENT="${ZSH_NU_TABLE_MIN_WIDTH_PERCENT:-50}"
 
-_nls_human_size() {
+_zsh_table_ensure_lll() {
+	local lll_path="${HOME}/.local/bin/lll"
+	local lll_dir="${HOME}/.local/bin"
+	local existing_lll=""
+
+	if command -v lll >/dev/null 2>&1; then
+		existing_lll="$(command -v lll)"
+		if [[ "$existing_lll" == "$lll_path" ]] && grep -q 'source.*\.zsh_table\|nls_table' "$lll_path" 2>/dev/null; then
+			return 0
+		fi
+	fi
+
+	mkdir -p "$lll_dir" 2>/dev/null || return 0
+	cat > "$lll_path" <<'EOF'
+#!/usr/bin/env zsh
+emulate -L zsh
+if [[ -f "$HOME/.zsh/modules/.zsh_table" ]]; then
+  source "$HOME/.zsh/modules/.zsh_table" >/dev/null 2>&1 || true
+fi
+if whence -w lll >/dev/null 2>&1; then
+  lll "$@"
+  exit $?
+fi
+exec ls -l --group-directories-first --color=auto "$@"
+EOF
+	chmod +x "$lll_path" 2>/dev/null || return 0
+
+	case ":$PATH:" in
+		*":$lll_dir:"*) ;;
+		*) export PATH="$lll_dir:$PATH" ;;
+	esac
+}
+
+_zsh_table_ensure_lll
+
+lll() {
+	lll_table "$@"
+}
+
+_lll_human_size() {
 	local bytes="$1"
 	local -a units=("B" "KiB" "MiB" "GiB" "TiB" "PiB")
 	local unit_index=1
@@ -23,7 +62,7 @@ _nls_human_size() {
 	print -r -- "$scaled ${units[unit_index]}"
 }
 
-_nls_format_epoch() {
+_lll_format_epoch() {
 	local epoch="$1"
 
 	[[ "$epoch" == <-> ]] || {
@@ -44,7 +83,7 @@ _nls_format_epoch() {
 	print -r -- "-"
 }
 
-_nls_stat_size_epoch() {
+_lll_stat_size_epoch() {
 	local path="$1"
 	local stat_bin=""
 
@@ -64,7 +103,7 @@ _nls_stat_size_epoch() {
 	"$stat_bin" -f '%z|%m' -- "$path" 2>/dev/null
 }
 
-_nls_stat_mode_owner_group() {
+_lll_stat_mode_owner_group() {
 	local path="$1"
 	local stat_bin=""
 	local permissions="-"
@@ -96,7 +135,7 @@ _nls_stat_mode_owner_group() {
 	print -r -- "${permissions}|${owner}|${group}"
 }
 
-_nls_render_table() {
+_lll_render_table() {
 	local style="${1:-ascii}"
 	local min_total_width="${2:-0}"
 	local link_color="${3:-}"
@@ -276,7 +315,7 @@ _nls_render_table() {
 }
 
 
-_nls_target_has_symlink() {
+_lll_target_has_symlink() {
 	local target="$1"
 	local include_all="$2"
 	local -a entries
@@ -301,7 +340,7 @@ _nls_target_has_symlink() {
 	return 1
 }
 
-_nls_type_for_path() {
+_lll_type_for_path() {
 	local path="$1"
 
 	if [[ -L "$path" ]]; then
@@ -322,7 +361,7 @@ _nls_type_for_path() {
 	print -r -- "other"
 }
 
-_nls_table_for_target() {
+_lll_table_for_target() {
 	local target="$1"
 	local include_all="$2"
 	local style="$3"
@@ -353,7 +392,7 @@ _nls_table_for_target() {
 	elif [[ -e "$target" || -L "$target" ]]; then
 		entries=("$target")
 	else
-		print -u2 -- "nls: cannot access '$target'"
+		print -u2 -- "lll: cannot access '$target'"
 		return 1
 	fi
 
@@ -372,7 +411,7 @@ _nls_table_for_target() {
 	if [[ "$sort_field" == "default" ]]; then
 		for sort_entry in "${entries[@]}"; do
 			sort_name="${sort_entry:t}"
-			sort_type="$(_nls_type_for_path "$sort_entry")"
+			sort_type="$(_lll_type_for_path "$sort_entry")"
 			sort_bucket="4"
 			case "$sort_type" in
 				dir)
@@ -420,7 +459,7 @@ _nls_table_for_target() {
 			sort_name="${sort_entry:t}"
 			sort_key1="0"
 			sort_key2="0"
-			stats="$(_nls_stat_size_epoch "$sort_entry")"
+			stats="$(_lll_stat_size_epoch "$sort_entry")"
 			if [[ -n "$stats" ]]; then
 				sort_key1="${stats%%|*}"
 				sort_key2="${stats##*|}"
@@ -458,7 +497,7 @@ _nls_table_for_target() {
 	rows+=("${tab}name${tab}type${tab}permissions${tab}owner${tab}group${tab}size${tab}modified")
 
 	for entry in "${entries[@]}"; do
-		stats="$(_nls_stat_size_epoch "$entry")"
+		stats="$(_lll_stat_size_epoch "$entry")"
 		if [[ -n "$stats" ]]; then
 			stats_size="${stats%%|*}"
 			stats_epoch="${stats##*|}"
@@ -471,7 +510,7 @@ _nls_table_for_target() {
 		local permissions="-"
 		local owner="-"
 		local group="-"
-		stat_meta="$(_nls_stat_mode_owner_group "$entry")"
+		stat_meta="$(_lll_stat_mode_owner_group "$entry")"
 		if [[ -n "$stat_meta" ]]; then
 			permissions="${stat_meta%%|*}"
 			stat_meta="${stat_meta#*|}"
@@ -479,9 +518,9 @@ _nls_table_for_target() {
 			group="${stat_meta##*|}"
 		fi
 
-		size_human="$(_nls_human_size "$stats_size")"
-		modified="$(_nls_format_epoch "$stats_epoch")"
-		item_type="$(_nls_type_for_path "$entry")"
+		size_human="$(_lll_human_size "$stats_size")"
+		modified="$(_lll_format_epoch "$stats_epoch")"
+		item_type="$(_lll_type_for_path "$entry")"
 		item_name="${entry:t}"
 		item_name="${item_name//$'\t'/ }"
 		item_name="${item_name//$'\n'/ }"
@@ -499,10 +538,10 @@ _nls_table_for_target() {
 		row_index=$(( row_index + 1 ))
 	done
 
-	printf '%s\n' "${rows[@]}" | _nls_render_table "$style" "$min_total_width" $'\033[36m' $'\033[0m'
+	printf '%s\n' "${rows[@]}" | _lll_render_table "$style" "$min_total_width" $'\033[36m' $'\033[0m'
 }
 
-_nls_terminal_columns() {
+_lll_terminal_columns() {
 	local cols=""
 
 	if [[ "${COLUMNS:-}" == <-> ]] && (( COLUMNS > 0 )); then
@@ -521,7 +560,7 @@ _nls_terminal_columns() {
 	print -r -- "0"
 }
 
-nls() {
+lll_table() {
 	local -a targets
 	local -a raw_args
 	local arg=""
@@ -590,7 +629,7 @@ nls() {
 				sort_dir="desc"
 				;;
 			--help)
-				print -r -- "usage: nls [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
+				print -r -- "usage: lll [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
 				return 0
 				;;
 			*)
@@ -601,14 +640,18 @@ nls() {
 
 	(( ${#targets[@]} )) || targets=(".")
 	if [[ "$include_all" == false ]]; then
-		zsh_startup_is_truthy "$ZSH_NU_TABLE_USE_ALL" && include_all=true
+		if (( ${+functions[zsh_startup_is_truthy]} )); then
+			zsh_startup_is_truthy "$ZSH_NU_TABLE_USE_ALL" && include_all=true
+		elif [[ "${ZSH_NU_TABLE_USE_ALL:-true}" == [Tt]rue ]]; then
+			include_all=true
+		fi
 	fi
 
 	[[ "${(L)table_style}" == "ascii" ]] && use_nu=false
 
 	if [[ "$use_nu" == true ]] && command -v nu >/dev/null 2>&1; then
 		for target in "${targets[@]}"; do
-			if _nls_target_has_symlink "$target" "$include_all"; then
+			if _lll_target_has_symlink "$target" "$include_all"; then
 				has_symlinks=true
 				break
 			fi
@@ -622,7 +665,7 @@ nls() {
 	(( width_percent > 100 )) && width_percent=100
 
 	if [[ "${(L)table_style}" == "encoded" ]]; then
-		terminal_columns="$(_nls_terminal_columns)"
+		terminal_columns="$(_lll_terminal_columns)"
 		if [[ "$terminal_columns" == <-> ]] && (( terminal_columns > 0 )); then
 			min_total_width=$(( (terminal_columns * width_percent + 99) / 100 ))
 		fi
@@ -652,10 +695,14 @@ nls() {
 			printf '==> %s <==\n' "$target"
 		fi
 
-		_nls_table_for_target "$target" "$include_all" "$table_style" "$min_total_width" "$sort_field" "$sort_dir" || exit_code=$?
+		_lll_table_for_target "$target" "$include_all" "$table_style" "$min_total_width" "$sort_field" "$sort_dir" || exit_code=$?
 	done
 
 	return "$exit_code"
 }
 
-alias lstable='nls'
+nls_table() {
+	lll_table "$@"
+}
+
+alias lstable='lll'
