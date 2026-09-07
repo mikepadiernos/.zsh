@@ -3,6 +3,14 @@
 This folder contains a modular Zsh setup focused on fast startup, lazy loading, and project-aware behavior.
 It is an opinionated and advanced shell environment with many quality-of-life features, designed to stay OS-agnostic across Linux, macOS, and WSL-friendly workflows.
 
+## Fresh Clone Quick Start
+
+Run these commands on a new machine after cloning to `~/.zsh`:
+
+1. `zsh_plugins --install`
+2. `source ~/.zshrc`
+3. `tools --update --dry-run`
+
 User detection and portability:
 - User-specific behavior is dynamic and avoids hard-coded usernames.
 - Runtime user defaults are derived from `ZSH_RUNTIME_USER` and then `USER`.
@@ -12,8 +20,8 @@ User detection and portability:
 
 1. `.zsh/.zshrc`
 2. `.zsh/configs/.zsh_bootstrap`
-3. `.zsh/configs/.zsh_load_modules`
-4. `.zsh/configs/.zsh_load_configs`
+3. `.zsh/configs/.zsh_load_configs`
+4. `.zsh/configs/.zsh_load_modules`
 
 Bootstrap also caches generated init scripts for selected tools to improve startup time.
 
@@ -66,7 +74,7 @@ Provided by `.zsh/configs/.zsh_completions`.
 
 Highlights:
 - Uses compinit with cache dump at `~/.cache/zsh/zcompdump-<zsh_version>`.
-- Forces non-interactive compinit startup arguments (`-i -u`) to avoid interactive security prompts in VPS/non-root environments.
+- Uses non-interactive compinit startup arguments (`-i`) to avoid security prompts, with `-u` enabled for root shells.
 - Enables lazy completion generation for heavy CLIs (docker, kubectl, helm, argocd, az, etc.).
 - Adds custom completion for:
   - zsh_themes
@@ -227,10 +235,10 @@ Examples:
 - ZSH_PLUGINS_FORK_OWNER_REGEX='(fork|forks)$' zsh_plugins --check-forks
 
 Suggested fork sync flow:
-- git -C ~/.files/.zsh/plugins/<plugin> remote add upstream <original-repo-url>
-- git -C ~/.files/.zsh/plugins/<plugin> fetch upstream
-- git -C ~/.files/.zsh/plugins/<plugin> merge --ff-only upstream/main
-- git -C ~/.files/.zsh/plugins/<plugin> push origin HEAD
+- git -C ~/.zsh/plugins/<plugin> remote add upstream <original-repo-url>
+- git -C ~/.zsh/plugins/<plugin> fetch upstream
+- git -C ~/.zsh/plugins/<plugin> merge --ff-only upstream/main
+- git -C ~/.zsh/plugins/<plugin> push origin HEAD
 
 ### 9) Shell Setup Helper
 
@@ -312,6 +320,11 @@ Required repository layout:
 - this zsh repo must live at `~/.zsh`
 - a separate `~/.files` directory is required
 - `FILES` defaults to `~/.files`; app-specific configs are expected under `~/.files` (for example `.atuin`, `.lazygit`, `.yazi`, `.qute`, `.copyq`, `.vscode`, `.gtk-nocsd`)
+
+Plugin repository tracking model:
+- Plugin directories under `~/.zsh/plugins` are intentionally treated as local clones.
+- Git tracking keeps `plugins/git_repos.txt` (source of truth) and `plugins/.gitignore`; plugin repo folders are ignored.
+- Bootstrap missing plugin clones with `zsh_plugins --install`.
 
 Required `~/.files` contents for full setup behavior:
 - `~/.files/.fzf`
