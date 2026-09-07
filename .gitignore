@@ -1,3 +1,4 @@
 .copilot-specs-cache/
 .temp/
-.vscode/
+.vscode/*
+!.vscode/tasks.json
