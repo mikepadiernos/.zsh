@@ -423,6 +423,24 @@ Ecosystem-specific helpers:
 - code command on PATH (for VS Code settings/keybindings link mappings)
 - nvidia-smi and steam (GPU offload helpers)
 
+### Manual Atuin Setup for a Fresh Clone
+
+If you have just cloned this framework and want to prepare Atuin manually, run:
+
+- ./scripts/setup-atuin.sh --install
+- ./scripts/setup-atuin.sh --symlink-only
+
+This script will:
+- install Atuin via `mise` when available, or via `cargo` if `mise` is not installed
+- create the expected `~/.files/.atuin` and `~/.files/.atuin/data` layout
+- symlink `~/.config/atuin` to `~/.files/.atuin`
+- symlink `~/.local/share/atuin` to `~/.files/.atuin/data`
+- create a minimal `config.toml` if it is missing
+
+After setup, reload the shell:
+
+- source ~/.zshrc
+
 ### Daily Workflow
 
 1. Start shell and verify:
