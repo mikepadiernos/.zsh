@@ -618,29 +618,28 @@ _lll_fast_table_for_target() {
 		size=""
 		owner=""
 		group=""
-		date=""
-		time_marker=""
-		timestamp=""
+		modified=""
 		item_name=""
+		rest=""
 
-		if [[ "$line" =~ ^([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)$ ]]; then
+		if [[ "$line" =~ ^([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+(.*)$ ]]; then
 			permissions="${match[1]}"
 			size="${match[2]}"
 			owner="${match[3]}"
 			group="${match[4]}"
-			date="${match[5]}"
-			time_marker="${match[6]}"
-			timestamp="${match[7]}"
-			item_name="${match[8]}"
+			rest="${match[5]}"
 		else
 			continue
 		fi
 
-		if [[ -n "$timestamp" && "$time_marker" == "-" ]]; then
-			modified="${date} - ${timestamp}"
+		if [[ "$rest" =~ ^(.*)[[:space:]]+([^[:space:]]+)$ ]]; then
+			modified="${match[1]}"
+			item_name="${match[2]}"
 		else
-			modified="${date}"
+			modified="$rest"
+			item_name=""
 		fi
+
 		if [[ "$permissions" == d* ]]; then
 			item_type="dir"
 		elif [[ "$permissions" == l* ]]; then
@@ -698,7 +697,7 @@ lll_table() {
 
 	for arg in "${raw_args[@]}"; do
 		case "$arg" in
-			--fast)
+			--fast|-f)
 				use_fast=true
 				;;
 			--ascii)
@@ -748,7 +747,7 @@ lll_table() {
 				sort_dir="desc"
 				;;
 			--help)
-				print -r -- "usage: lll [--fast] [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
+				print -r -- "usage: lll [-f|--fast] [--ascii|--encoded] [--all|--no-all] [--sort=size|modified|both] [--asc|--desc] [path ...]"
 				return 0
 				;;
 			*)

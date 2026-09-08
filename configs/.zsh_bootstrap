@@ -163,7 +163,9 @@ if _zsh_startup_should_disable_mise_tools; then
 fi
 
 source_cached_init fzf --zsh
-source_cached_init atuin init zsh
+if (( ${+functions[zsh_atuin_init_shell]} )); then
+	zsh_atuin_init_shell
+fi
 source_cached_init zoxide init --cmd cd zsh
 
 zsh_startup_profile_report

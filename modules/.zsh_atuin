@@ -1,0 +1,368 @@
+#!/usr/bin/env zsh
+
+typeset -g ZSH_ATUIN_FILES_DIR="${ZSH_ATUIN_FILES_DIR:-${FILES:-$HOME/.files}/.atuin}"
+typeset -g ZSH_ATUIN_DATA_DIR="${ZSH_ATUIN_DATA_DIR:-${ZSH_ATUIN_FILES_DIR}/data}"
+typeset -g ZSH_ATUIN_CONFIG_TARGET="${ZSH_ATUIN_CONFIG_TARGET:-$HOME/.config/atuin}"
+typeset -g ZSH_ATUIN_DATA_TARGET="${ZSH_ATUIN_DATA_TARGET:-$HOME/.local/share/atuin}"
+
+zsh_atuin_is_available() {
+	command -v atuin >/dev/null 2>&1 && command atuin --version >/dev/null 2>&1
+}
+
+zsh_atuin_default_history_file() {
+	if [[ -f "$HOME/.zsh_history" ]]; then
+		print -r -- "$HOME/.zsh_history"
+		return 0
+	fi
+
+	if [[ -f "$HOME/.temp/zsh/zsh_history" ]]; then
+		print -r -- "$HOME/.temp/zsh/zsh_history"
+		return 0
+	fi
+
+	print -r -- "$HOME/.zsh_history"
+}
+
+zsh_atuin_configure_history() {
+	if zsh_atuin_is_available; then
+		HISTFILE="$HOME/.zsh_history"
+		return 0
+	fi
+
+	return 1
+}
+
+zsh_atuin_init_shell() {
+	zsh_atuin_is_available || return 0
+
+	if (( ${+functions[source_cached_init]} )); then
+		source_cached_init atuin init zsh
+		return $?
+	fi
+
+	eval "$(command atuin init zsh)"
+}
+
+zsh_atuin_setup_usage() {
+	cat <<'EOF'
+setup-atuin.sh [--install] [--symlink-only] [--import-history] [--register|--login] [--sync] [--status] [--history-file PATH] [--dry-run]
+
+Install and configure Atuin for a fresh clone of this zsh framework.
+
+Behavior:
+	- installs Atuin with mise when available, otherwise with cargo
+	- creates ~/.files/.atuin and ~/.files/.atuin/data if needed
+	- symlinks ~/.config/atuin -> ~/.files/.atuin
+	- symlinks ~/.local/share/atuin -> ~/.files/.atuin/data
+	- writes a minimal config.toml when absent
+	- can import existing zsh history into Atuin on demand
+	- can run interactive Atuin register/login and sync steps on demand
+
+Examples:
+	./scripts/setup-atuin.sh
+	./scripts/setup-atuin.sh --install
+	./scripts/setup-atuin.sh --symlink-only
+	./scripts/setup-atuin.sh --install --import-history
+	./scripts/setup-atuin.sh --login --sync
+	./scripts/setup-atuin.sh --dry-run
+EOF
+}
+
+zsh_atuin_setup_ensure_parent_dir() {
+	local target_dir="$1"
+
+	if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+		echo "[dry-run] mkdir -p '$target_dir'"
+		return 0
+	fi
+
+	mkdir -p "$target_dir"
+}
+
+zsh_atuin_setup_link_path() {
+	local source_path="$1"
+	local target_path="$2"
+	local target_dir="${target_path:h}"
+
+	if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+		if [[ -L "$target_path" || -e "$target_path" ]]; then
+			echo "[dry-run] rm -f '$target_path' && ln -s '$source_path' '$target_path'"
+		else
+			echo "[dry-run] mkdir -p '$target_dir' && ln -s '$source_path' '$target_path'"
+		fi
+		return 0
+	fi
+
+	zsh_atuin_setup_ensure_parent_dir "$target_dir"
+
+	if [[ -L "$target_path" ]]; then
+		if [[ "$(readlink "$target_path")" == "$source_path" ]]; then
+			return 0
+		fi
+		rm -f "$target_path"
+	elif [[ -e "$target_path" ]]; then
+		mv "$target_path" "${target_path}.bak.$(date +%s)"
+	fi
+
+	ln -s "$source_path" "$target_path"
+}
+
+zsh_atuin_setup_print_status() {
+	echo "setup-atuin: repo root: ${ZSH_ATUIN_REPO_ROOT:-${ZSH:-$HOME/.zsh}}"
+	echo "setup-atuin: files root: ${FILES:-$HOME/.files}"
+	echo "setup-atuin: config source: $ZSH_ATUIN_FILES_DIR"
+	echo "setup-atuin: data source: $ZSH_ATUIN_DATA_DIR"
+	echo "setup-atuin: config target: $ZSH_ATUIN_CONFIG_TARGET"
+	echo "setup-atuin: data target: $ZSH_ATUIN_DATA_TARGET"
+	echo "setup-atuin: history import file: ${ZSH_ATUIN_HISTORY_FILE:-$(zsh_atuin_default_history_file)}"
+	if command -v atuin >/dev/null 2>&1; then
+		echo "setup-atuin: atuin binary: $(command -v atuin)"
+	else
+		echo "setup-atuin: atuin binary: missing"
+	fi
+}
+
+zsh_atuin_setup_install() {
+	if command -v atuin >/dev/null 2>&1; then
+		echo "setup-atuin: atuin already available: $(command -v atuin)"
+		return 0
+	fi
+
+	if command -v mise >/dev/null 2>&1; then
+		echo "setup-atuin: installing atuin via mise"
+		if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+			echo "[dry-run] mise use --global atuin"
+			return 0
+		fi
+		mise use --global atuin || return 1
+		return 0
+	fi
+
+	if command -v cargo >/dev/null 2>&1; then
+		echo "setup-atuin: installing atuin via cargo"
+		if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+			echo "[dry-run] cargo install atuin --locked --root '$HOME/.local'"
+			return 0
+		fi
+		cargo install atuin --locked --root "$HOME/.local" || return 1
+		export PATH="$HOME/.local/bin:$PATH"
+		return 0
+	fi
+
+	echo "setup-atuin: atuin is not installed and neither mise nor cargo is available." >&2
+	echo "setup-atuin: install it manually, then rerun this script." >&2
+	echo "setup-atuin: examples:" >&2
+	echo "  mise use --global atuin" >&2
+	echo "  cargo install atuin --locked" >&2
+	return 1
+}
+
+zsh_atuin_setup_require_binary() {
+	if command -v atuin >/dev/null 2>&1; then
+		return 0
+	fi
+
+	echo "setup-atuin: atuin is not available yet." >&2
+	echo "setup-atuin: rerun with --install or install Atuin manually first." >&2
+	return 1
+}
+
+zsh_atuin_setup_ensure_files_layout() {
+	zsh_atuin_setup_ensure_parent_dir "$ZSH_ATUIN_FILES_DIR"
+	zsh_atuin_setup_ensure_parent_dir "$ZSH_ATUIN_DATA_DIR"
+
+	if [[ ! -f "$ZSH_ATUIN_FILES_DIR/config.toml" ]]; then
+		if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+			echo "[dry-run] cat > '$ZSH_ATUIN_FILES_DIR/config.toml' <<'EOF'"
+			echo "[sync]"
+			echo "records = true"
+			echo "EOF"
+		else
+			cat > "$ZSH_ATUIN_FILES_DIR/config.toml" <<'EOF'
+[sync]
+records = true
+EOF
+		fi
+	fi
+}
+
+zsh_atuin_setup_ensure_symlinks() {
+	if [[ -n "$ZSH_ATUIN_CONFIG_TARGET" ]]; then
+		zsh_atuin_setup_link_path "$ZSH_ATUIN_FILES_DIR" "$ZSH_ATUIN_CONFIG_TARGET"
+	fi
+
+	if [[ -n "$ZSH_ATUIN_DATA_TARGET" ]]; then
+		zsh_atuin_setup_link_path "$ZSH_ATUIN_DATA_DIR" "$ZSH_ATUIN_DATA_TARGET"
+	fi
+}
+
+zsh_atuin_setup_import_history() {
+	local history_file="${1:-${ZSH_ATUIN_HISTORY_FILE:-$(zsh_atuin_default_history_file)}}"
+
+	zsh_atuin_setup_require_binary || return 1
+
+	if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+		echo "setup-atuin: importing shell history from $history_file"
+		echo "[dry-run] atuin import zsh < '$history_file'"
+		return 0
+	fi
+
+	if [[ ! -f "$history_file" ]]; then
+		echo "setup-atuin: history file not found: $history_file" >&2
+		return 1
+	fi
+
+	echo "setup-atuin: importing shell history from $history_file"
+	command atuin import zsh < "$history_file"
+}
+
+zsh_atuin_setup_run_action() {
+	local action="$1"
+
+	zsh_atuin_setup_require_binary || return 1
+
+	echo "setup-atuin: running 'atuin $action'"
+	if (( ${ZSH_ATUIN_SETUP_DRY_RUN:-0} )); then
+		echo "[dry-run] atuin $action"
+		return 0
+	fi
+
+	command atuin "$action"
+}
+
+zsh_atuin_setup_print_next_steps() {
+	echo "setup-atuin: ready"
+	echo "setup-atuin: source ~/.zshrc to load atuin shell init"
+	printf '%s\n' "setup-atuin: shell init hook: source_cached_init atuin init zsh"
+
+	if (( ! ${ZSH_ATUIN_SETUP_REGISTER_MODE:-0} && ! ${ZSH_ATUIN_SETUP_LOGIN_MODE:-0} )); then
+		echo "setup-atuin: optional sync setup: rerun with --register --sync or --login --sync"
+	fi
+
+	if (( ! ${ZSH_ATUIN_SETUP_IMPORT_HISTORY_MODE:-0} )); then
+		echo "setup-atuin: optional history import: rerun with --import-history"
+	fi
+}
+
+zsh_atuin_setup_main() {
+	local manual_mode=0
+	local symlink_only=0
+	local import_history_mode=0
+	local status_mode=0
+	local sync_mode=0
+	local register_mode=0
+	local login_mode=0
+	local history_file=""
+	local expect_history_file=0
+	local arg=""
+
+	ZSH_ATUIN_SETUP_DRY_RUN=0
+
+	for arg in "$@"; do
+		if (( expect_history_file )); then
+			history_file="$arg"
+			expect_history_file=0
+			continue
+		fi
+
+		case "$arg" in
+			--help|-h)
+				zsh_atuin_setup_usage
+				return 0
+				;;
+			--install)
+				manual_mode=1
+				;;
+			--symlink-only)
+				symlink_only=1
+				;;
+			--import-history)
+				import_history_mode=1
+				;;
+			--status)
+				status_mode=1
+				;;
+			--sync)
+				sync_mode=1
+				;;
+			--register)
+				register_mode=1
+				;;
+			--login)
+				login_mode=1
+				;;
+			--history-file)
+				expect_history_file=1
+				;;
+			--history-file=*)
+				history_file="${arg#*=}"
+				;;
+			--dry-run)
+				ZSH_ATUIN_SETUP_DRY_RUN=1
+				;;
+			*)
+				echo "setup-atuin: unknown flag '$arg'"
+				zsh_atuin_setup_usage
+				return 1
+				;;
+		esac
+	done
+
+	if (( expect_history_file )); then
+		echo "setup-atuin: --history-file requires a path argument" >&2
+		return 1
+	fi
+
+	if (( register_mode && login_mode )); then
+		echo "setup-atuin: use either --register or --login, not both" >&2
+		return 1
+	fi
+
+	if [[ -z "$history_file" ]]; then
+		history_file="$(zsh_atuin_default_history_file)"
+	fi
+
+	ZSH_ATUIN_HISTORY_FILE="$history_file"
+	ZSH_ATUIN_SETUP_REGISTER_MODE="$register_mode"
+	ZSH_ATUIN_SETUP_LOGIN_MODE="$login_mode"
+	ZSH_ATUIN_SETUP_IMPORT_HISTORY_MODE="$import_history_mode"
+
+	if (( symlink_only )); then
+		if (( status_mode )); then
+			zsh_atuin_setup_print_status
+		fi
+		zsh_atuin_setup_ensure_files_layout
+		zsh_atuin_setup_ensure_symlinks
+		echo "setup-atuin: symlinks ready"
+		return 0
+	fi
+
+	if (( manual_mode )); then
+		zsh_atuin_setup_install || return 1
+	fi
+
+	if (( status_mode )); then
+		zsh_atuin_setup_print_status
+	fi
+
+	zsh_atuin_setup_ensure_files_layout
+	zsh_atuin_setup_ensure_symlinks
+
+	if (( import_history_mode )); then
+		zsh_atuin_setup_import_history "$history_file" || return 1
+	fi
+
+	if (( register_mode )); then
+		zsh_atuin_setup_run_action register || return 1
+	fi
+
+	if (( login_mode )); then
+		zsh_atuin_setup_run_action login || return 1
+	fi
+
+	if (( sync_mode )); then
+		zsh_atuin_setup_run_action sync || return 1
+	fi
+
+	zsh_atuin_setup_print_next_steps
+}

@@ -281,7 +281,7 @@ Nushell-inspired table listing (from `.zsh/modules/.zsh_table`):
 - `lll`: canonical table-listing command.
 - `nls`: compatibility alias for `lll` kept for older workflows.
 - `lstable`: alias for `lll`.
-- `lll --fast`: quick pass through `eza --long --grid` when `eza` is installed; otherwise it falls back to the rich table renderer.
+- `lll --fast` / `lll -f`: quick pass through `eza --long --grid` when `eza` is installed; otherwise it falls back to the rich table renderer.
 - `lll --encoded`: Unicode box-drawing table (default style).
 - `lll --ascii`: ASCII-only table borders for limited terminals.
 - `lll --all` / `lll --no-all`: include or exclude hidden entries.
@@ -298,25 +298,25 @@ Credits:
 Example output (`lll --ascii`):
 
 ```text
-+----+-----------+------+--------+------------------+
-| #  | name      | type | size   | modified         |
-+----+-----------+------+--------+------------------+
-| 0  | configs   | dir  | 320 B  | 2026-09-06 21:14 |
-| 1  | README.md | file | 17 KiB | 2026-09-06 20:20 |
-| 2  | plugins -> ../plugins | link | 4 B | 2026-09-06 20:20 |
-+----+-----------+------+--------+------------------+
++----+------------+------+-------------+---------------+---------------+--------+-----------------------+
+|    | name       | type | permissions | owner         | group         | size   | modified              |
++----+------------+------+-------------+---------------+---------------+--------+-----------------------+
+| 00 | .git       | dir  | drwxr-xr-x  | mikepadiernos | mikepadiernos | 166 B  | 2026.09.07 - 20:27:36 |
+| 01 | configs    | dir  | drwxr-xr-x  | mikepadiernos | mikepadiernos | 320 B  | 2026.09.07 - 00:37:56 |
+| 02 | README.md  | file | -rw-r--r--  | mikepadiernos | mikepadiernos | 22 kB  | 2026.09.07 - 16:10:17 |
++----+------------+------+-------------+---------------+---------------+--------+-----------------------+
 ```
 
 Example output (`lll --encoded`):
 
 ```text
-╭────┬───────────┬──────┬────────┬──────────────────╮
-│ #  │ name      │ type │ size   │ modified         │
-├────┼───────────┼──────┼────────┼──────────────────┤
-│ 0  │ configs   │ dir  │ 320 B  │ 2026-09-06 21:14 │
-│ 1  │ README.md │ file │ 17 KiB │ 2026-09-06 20:20 │
-│ 2  │ plugins -> ../plugins │ link │ 4 B │ 2026-09-06 20:20 │
-╰────┴───────────┴──────┴────────┴──────────────────╯
+╭────┬────────────┬──────┬─────────────┬───────────────┬───────────────┬────────┬───────────────────────╮
+│    │ name       │ type │ permissions │ owner         │ group         │ size   │ modified              │
+├────┼────────────┼──────┼─────────────┼───────────────┼───────────────┼────────┼───────────────────────┤
+│ 00 │ .git       │ dir  │ drwxr-xr-x  │ mikepadiernos │ mikepadiernos │ 166 B  │ 2026.09.07 - 20:27:36 │
+│ 01 │ configs    │ dir  │ drwxr-xr-x  │ mikepadiernos │ mikepadiernos │ 320 B  │ 2026.09.07 - 00:37:56 │
+│ 02 │ README.md  │ file │ -rw-r--r--  │ mikepadiernos │ mikepadiernos │ 22 kB  │ 2026.09.07 - 16:10:17 │
+╰────┴────────────┴──────┴─────────────┴───────────────┴───────────────┴────────┴───────────────────────╯
 ```
 
 Conditional aliases:
@@ -435,8 +435,20 @@ Ecosystem-specific helpers:
 
 If you have just cloned this framework and want to prepare Atuin manually, run:
 
+1. Install and create the expected Atuin layout:
 - ./scripts/setup-atuin.sh --install
+2. Import existing shell history when migrating from a previous shell setup:
+- ./scripts/setup-atuin.sh --import-history
+3. If you use Atuin sync, connect this machine and pull history:
+- ./scripts/setup-atuin.sh --login --sync
+
+For a filesystem-only setup without touching the Atuin binary, run:
+
 - ./scripts/setup-atuin.sh --symlink-only
+
+You can inspect what the script would do first with:
+
+- ./scripts/setup-atuin.sh --dry-run --status
 
 This script will:
 - install Atuin via `mise` when available, or via `cargo` if `mise` is not installed
@@ -444,6 +456,8 @@ This script will:
 - symlink `~/.config/atuin` to `~/.files/.atuin`
 - symlink `~/.local/share/atuin` to `~/.files/.atuin/data`
 - create a minimal `config.toml` if it is missing
+- optionally import `~/.zsh_history` or a file passed with `--history-file`
+- optionally run `atuin register`, `atuin login`, and `atuin sync` when requested
 
 After setup, reload the shell:
 
