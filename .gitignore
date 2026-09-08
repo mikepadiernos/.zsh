@@ -1,4 +1,12 @@
-.copilot-specs-cache/
+.cache/
 .temp/
+
+# Editor and local runtime artifacts
+.copilot-specs-cache/
 .vscode/*
 !.vscode/tasks.json
+.idea/
+
+# Shell history (keep the tracked history file)
+history/*
+!history/.zsh_history
