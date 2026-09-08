@@ -1327,6 +1327,100 @@ _zsh_plugins_default_remote_branch() {
 	return 1
 }
 
+_zsh_plugins_default_upstream_url() {
+	local repo_name="$1"
+
+	case "$repo_name" in
+		zsh-abbr)
+			print -r -- "https://github.com/zsh-users/zsh-abbr.git"
+			;;
+		zsh-autocompletion)
+			print -r -- "https://github.com/zsh-users/zsh-autocompletion.git"
+			;;
+		zsh-autosuggestions)
+			print -r -- "https://github.com/zsh-users/zsh-autosuggestions.git"
+			;;
+		zsh-colors)
+			print -r -- "https://github.com/ohmyzsh/ohmyzsh.git"
+			;;
+		zsh-completions)
+			print -r -- "https://github.com/zsh-users/zsh-completions.git"
+			;;
+		zsh-doas-zsh-plugin)
+			print -r -- "https://github.com/ohmyzsh/ohmyzsh.git"
+			;;
+		zsh-docker-helpers)
+			print -r -- "https://github.com/ohmyzsh/oh-my-zsh.git"
+			;;
+		zsh-drupal)
+			print -r -- "https://github.com/ohmyzsh/oh-my-zsh.git"
+			;;
+		zsh-eza)
+			print -r -- "https://github.com/eza-community/eza.git"
+			;;
+		zsh-figures)
+			print -r -- "https://github.com/romkatv/powerlevel10k.git"
+			;;
+		zsh-F-Sy-H)
+			print -r -- "https://github.com/z-shell/F-Sy-H.git"
+			;;
+		zsh-fzf-git-branches)
+			print -r -- "https://github.com/junegunn/fzf-git.sh.git"
+			;;
+		zsh-fzf-plugin)
+			print -r -- "https://github.com/unixorn/fzf-zsh-plugin.git"
+			;;
+		zsh-fzf-tab)
+			print -r -- "https://github.com/Aloxaf/zsh-fzf-tab.git"
+			;;
+		zsh-job-queue)
+			print -r -- "https://github.com/robbyrussell/oh-my-zsh.git"
+			;;
+		zsh-magic-dashboard)
+			print -r -- "https://github.com/ohmyzsh/ohmyzsh.git"
+			;;
+		zsh-mise)
+			print -r -- "https://github.com/mise-plugins/zsh-mise.git"
+			;;
+		zsh-ssh)
+			print -r -- "https://github.com/ohmyzsh/ohmyzsh.git"
+			;;
+		zsh-you-should-use)
+			print -r -- "https://github.com/MichaelAquilina/zsh-you-should-use.git"
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+_zsh_plugins_ensure_upstream_remote() {
+	local dir="$1"
+	local name="$2"
+	local dry_run="${3:-0}"
+	local upstream_url=""
+
+	git -C "$dir" remote get-url upstream >/dev/null 2>&1 && return 0
+	upstream_url="$(_zsh_plugins_default_upstream_url "$name")" || return 0
+
+	if (( dry_run )); then
+		echo "[dry-run] git -C '$dir' remote add upstream '$upstream_url'"
+		return 0
+	fi
+
+	if git -C "$dir" remote add upstream "$upstream_url" >/dev/null 2>&1; then
+		echo "zsh_plugins: ensured upstream remote for $name -> $upstream_url"
+		return 0
+	fi
+
+	if git -C "$dir" remote set-url upstream "$upstream_url" >/dev/null 2>&1; then
+		echo "zsh_plugins: ensured upstream remote for $name -> $upstream_url"
+		return 0
+	fi
+
+	return 1
+}
+
 _zsh_plugins_warn_fork_sync() {
 	local dir="$1"
 	local name="$2"
@@ -1347,9 +1441,13 @@ _zsh_plugins_warn_fork_sync() {
 
 	upstream_url="$(git -C "$dir" remote get-url upstream 2>/dev/null)" || upstream_url=""
 	if [[ -z "$upstream_url" ]]; then
-		echo "zsh_plugins: warning: $name appears forked (origin -> $origin_url) but has no upstream remote"
-		echo "zsh_plugins: warning: add upstream to track sync, example: git -C '$dir' remote add upstream <original-repo-url>"
-		return 0
+		_zsh_plugins_ensure_upstream_remote "$dir" "$name" "$dry_run"
+		upstream_url="$(git -C "$dir" remote get-url upstream 2>/dev/null)" || upstream_url=""
+		if [[ -z "$upstream_url" ]]; then
+			echo "zsh_plugins: warning: $name appears forked (origin -> $origin_url) but has no upstream remote"
+			echo "zsh_plugins: warning: add upstream to track sync, example: git -C '$dir' remote add upstream <original-repo-url>"
+			return 0
+		fi
 	fi
 
 	origin_branch="$(_zsh_plugins_default_remote_branch "$dir" origin)" || return 0
@@ -1506,6 +1604,10 @@ EOF
 					failed=$((failed + 1))
 				fi
 			fi
+		fi
+
+		if (( action_check_forks || action_update || action_install )); then
+			_zsh_plugins_ensure_upstream_remote "$repo_dir" "$repo_name" "$dry_run"
 		fi
 
 		if (( action_check_forks )); then

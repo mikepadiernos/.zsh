@@ -11,6 +11,7 @@ zsh_config_files=(
 	"${ZSH_MODULES}/.zsh_go"
 	"${ZSH_CONFIGS}/.zsh_completions"
 	"${ZSH_CONFIGS}/.zsh_prompt"
+	"${ZSH_CONFIGS}/.zsh_health"
 	"${ZSH_CONFIGS}/.zsh_setup"
 	"${ZSH_CONFIGS}/.zsh_tools"
 )
